@@ -11,6 +11,7 @@ import me.matl114.events.Listener;
 import me.matl114.events.catchers.TimedPacketCatcherImpl;
 import me.matl114.events.impl.EventContainer;
 import me.matl114.gui.basic.DrawableWidget;
+import me.matl114.hacks.ChatTasks;
 import me.matl114.hacks.MainTasks;
 import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
@@ -102,6 +103,10 @@ public class TravellingControl extends BaseModule implements LegalMovementManage
             .build();
 
     public FlagRef pitch40SafeHeight = flagBuilder(travellingControl.add("pitch-40-end-safety"))
+            .show(() -> controlType.get().isIn(Type.ELYTRA_PITCH40, Type.ELYTRA_GRIM_FLY40))
+            .build();
+
+    public FlagRef pitch40SafeHeightProxy = flagBuilder(travellingControl.add("pitch-40-end-safety-proxy"))
             .show(() -> controlType.get().isIn(Type.ELYTRA_PITCH40, Type.ELYTRA_GRIM_FLY40))
             .build();
 
@@ -722,7 +727,16 @@ public class TravellingControl extends BaseModule implements LegalMovementManage
                 Debug.chat("[Pitch40] 滑翔失控了");
                 if (control.pitch40SafeHeight.get()) {
                     Debug.info("Pitch40 out of control!");
-                    MainTasks.scheduleDisconnect();
+
+                    if (control.pitch40SafeHeightProxy.get()) {
+
+                        ChatTasks.sayMessage("/disconnect", false);
+
+                    } else {
+                    
+                        MainTasks.scheduleDisconnect();
+
+                    }
                 }
                 startWork = false;
                 control.onStop(ti);
