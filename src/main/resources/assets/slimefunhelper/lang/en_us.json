@@ -923,6 +923,7 @@
 	"travelling-control.max-height": "Travel: 最高高度",
 	"travelling-control.void-2-dup-packet": "Travel: MovVoid2叠加距离",
 	"travelling-control.pitch-40-end-safety": "Travel: Pitch40低高度自动断连",
+	"travelling-control.pitch-40-end-safety-proxy": "Travel: Pitch40低高度自动断连-Proxy",
 	"travelling-control.pitch-40-end-safety-2": "Travel: Pitch40到达目的地自动断连",
 	"travelling-control.pitch-40-height-limit": "Travel: Pitch40高度限制",
 	"travelling-control.pitch-40-end-kick": "Travel: Pitch40在子服间传送时自动断连",
