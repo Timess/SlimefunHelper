@@ -733,9 +733,8 @@ public class TravellingControl extends BaseModule implements LegalMovementManage
                         ChatTasks.sayMessage("/disconnect", false);
 
                     } else {
-                    
-                        MainTasks.scheduleDisconnect();
 
+                        MainTasks.scheduleDisconnect();
                     }
                 }
                 startWork = false;
