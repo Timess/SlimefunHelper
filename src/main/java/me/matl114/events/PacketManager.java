@@ -34,8 +34,9 @@ import net.minecraft.network.packet.s2c.play.*;
 import net.minecraft.world.World;
 
 public class PacketManager {
-
+    // this queue should be accessed only in event loop
     public static final ConcurrentLinkedQueue<PacketStorage> packetQueueIn = Queues.newConcurrentLinkedQueue();
+    // this queue can be accessed async
     public static final ConcurrentLinkedQueue<PacketStorage> packetQueueOut = Queues.newConcurrentLinkedQueue();
 
     public static final WeakHashMap<Packet<?>, List<Consumer<Event<Packet<?>>>>> postSendQueue = new WeakHashMap<>();
@@ -97,7 +98,7 @@ public class PacketManager {
         Listener.getPacketPostSendPoint().registerHandler(PacketManager::onPostPacketSend);
         Listener.getPacketPostScheduleSendPoint().registerHandler(PacketManager::onPostPacketScheduleSend);
     }
-
+    // must visit in eventLoop
     public static boolean startFlushIn = false;
     public static boolean startFlushOut = false;
     private static final MinecraftClient mc = MinecraftClient.getInstance();
@@ -155,46 +156,63 @@ public class PacketManager {
     }
 
     public static void flushInBound() {
-        try {
-            if (mc.getNetworkHandler() != null
-                    && mc.getNetworkHandler().getConnection().isOpen()) {
-                // flush
-                startFlushIn = true;
+        if (mc.getNetworkHandler() != null) {
+            mc.getNetworkHandler().getConnection().channel.eventLoop().execute(() -> {
                 try {
-                    for (var packet : packetQueueIn) {
-                        packet.handle();
+                    if (mc.getNetworkHandler() != null
+                            && mc.getNetworkHandler().getConnection().isOpen()) {
+                        // flush
+                        startFlushIn = true;
+                        try {
+                            for (var packet : packetQueueIn) {
+                                packet.handle();
+                            }
+                        } finally {
+                            startFlushIn = false;
+                            // clear async
+                            packetQueueIn.clear();
+                        }
+                    } else {
+                        packetQueueIn.clear();
                     }
-                } finally {
-                    startFlushIn = false;
+                } catch (Throwable e) {
+                    packetQueueIn.clear();
                 }
-            }
-        } finally {
+            });
+        } else {
             packetQueueIn.clear();
         }
     }
 
     public static void flushInBound(Function<PacketStorage, FlushAction> pdd) {
-        if (mc.getNetworkHandler() != null
-                && mc.getNetworkHandler().getConnection().isOpen()) {
-            // flush
-            startFlushIn = true;
-            var iter = packetQueueIn.iterator();
-            try {
-                while (iter.hasNext()) {
-                    var packet = iter.next();
-                    switch (pdd.apply(packet)) {
-                        case FLUSH -> {
-                            packet.handle();
-                            iter.remove();
+
+        // flush
+        if (mc.getNetworkHandler() != null) {
+            mc.getNetworkHandler().getConnection().channel.eventLoop().execute(() -> {
+                if (mc.getNetworkHandler() != null
+                        && mc.getNetworkHandler().getConnection().isOpen()) {
+                    startFlushIn = true;
+                    var iter = packetQueueIn.iterator();
+                    try {
+                        while (iter.hasNext()) {
+                            var packet = iter.next();
+                            switch (pdd.apply(packet)) {
+                                case FLUSH -> {
+                                    packet.handle();
+                                    iter.remove();
+                                }
+                                case DROP -> {
+                                    iter.remove();
+                                }
+                            }
                         }
-                        case DROP -> {
-                            iter.remove();
-                        }
+                    } finally {
+                        startFlushIn = false;
                     }
+                } else {
+                    packetQueueIn.removeIf((v) -> pdd.apply(v) != FlushAction.QUEUE);
                 }
-            } finally {
-                startFlushIn = false;
-            }
+            });
         } else {
             packetQueueIn.removeIf((v) -> pdd.apply(v) != FlushAction.QUEUE);
         }
@@ -277,6 +295,7 @@ public class PacketManager {
         packetSet2.add(PlayPackets.SYSTEM_CHAT);
         packetSet2.add(PlayPackets.CONTAINER_CLOSE_S2C);
         packetSet2.add(PlayPackets.LEVEL_CHUNK_WITH_LIGHT);
+        packetSet2.add(PlayPackets.CHUNKS_BIOMES);
     }
 
     public static boolean isInventoryPacket(Packet<?> pkt) {
