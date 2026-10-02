@@ -251,7 +251,11 @@ public class MainTasks {
 
     @ApiMethod
     public static void scheduleDisconnect() {
-        Tasks.scheduleDelayed(MainTasks::disconnectImmediately, 0);
+        if (MovTasks.getMovExtra().proxy.get()) {
+            ChatTasks.sayMessage("/disconnect", false);
+        } else {
+            Tasks.scheduleDelayed(MainTasks::disconnectImmediately, 0);
+        }
     }
 
     @ApiMethod
