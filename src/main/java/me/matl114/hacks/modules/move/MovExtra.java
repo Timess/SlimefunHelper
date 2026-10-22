@@ -31,6 +31,8 @@ public class MovExtra extends BaseModule {
         INSTANCE = this;
     }
 
+    public final FlagRef proxy = flagBuilder(moveSafety.add("proxy")).build();
+
     public final FlagRef noStepHeightFeature =
             flagBuilder(moveSafety.add("disable-stepheight-feature")).build();
 
