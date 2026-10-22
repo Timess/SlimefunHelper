@@ -36,9 +36,9 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.attribute.EntityAttributes;
-import net.minecraft.entity.mob.Angerable;
 import net.minecraft.entity.mob.EndermanEntity;
 import net.minecraft.entity.mob.ShulkerEntity;
+import net.minecraft.entity.mob.ZombifiedPiglinEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.scoreboard.Team;
@@ -284,11 +284,13 @@ public class TargetSelector extends BaseModule {
         if (target instanceof LivingEntity lv && lv.getHealth() <= 0) {
             return false;
         }
+
         if (!whiteListTypes.get().test(target.getType())) {
-            if (!passHostileCheck(target)) {
-                return false;
-            }
-            // if it is not friendly to us, and attackHostile is enabled, then we can still attack them
+            return false;
+        }
+
+        if (!passHostileCheck(target)) {
+            return false;
         }
 
         if (!isNotFriend(target)) {
@@ -407,15 +409,11 @@ public class TargetSelector extends BaseModule {
 
     private boolean passHostileCheck(Entity e) {
         if (hostile.get()) {
-            if (e instanceof Angerable anger) {
-                long time = anger.getAngerEndTime();
-                long currentTime = e.getEntityWorld().getTime();
-                return currentTime < time;
-            }
-            return false;
-        } else {
-            return false;
+            if (e instanceof EndermanEntity enderman && !enderman.isAngry()) return false;
+            if (e instanceof ZombifiedPiglinEntity piglin && !piglin.isAttacking()) return false;
         }
+
+        return true;
     }
 
     public List<Entity> getAttackableEntities(double nearbyOverride) {
