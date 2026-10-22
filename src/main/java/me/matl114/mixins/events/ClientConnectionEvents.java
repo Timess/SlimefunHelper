@@ -1,5 +1,6 @@
 package me.matl114.mixins.events;
 
+import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
@@ -54,6 +55,9 @@ public abstract class ClientConnectionEvents extends SimpleChannelInboundHandler
 
     @Shadow
     private int packetsSentCounter;
+
+    @Shadow
+    protected static <T extends PacketListener> void handlePacket(Packet<T> packet, PacketListener listener) {}
 
     @Unique
     NetworkState<?> currentInBoundState;
@@ -200,10 +204,6 @@ public abstract class ClientConnectionEvents extends SimpleChannelInboundHandler
         if (this.side == NetworkSide.SERVERBOUND) {
             return;
         }
-        if (PacketManager.handleQueueOutPacket(packet, (ClientConnection) (Object) this)) {
-            ci.cancel();
-            return;
-        }
         Packet<?> packetToSend = Listener.sendC2SPacket((ClientConnection) (Object) this, packet);
         if (packetToSend != packet) {
             if (packetToSend == null) {
@@ -215,22 +215,27 @@ public abstract class ClientConnectionEvents extends SimpleChannelInboundHandler
     }
 
     @Inject(method = "sendImmediately", at = @At("RETURN"))
-    private void sendImmediately(Packet<?> packet, ChannelFutureListener listener, boolean flush, CallbackInfo ci) {
-        // do not handle serverbound packet
-        if (this.side == NetworkSide.SERVERBOUND) {
-            return;
+    private void onSendImmediatelyFinish(
+            Packet<?> packet, ChannelFutureListener listener, boolean flush, CallbackInfo ci) {
+        if (this.side != NetworkSide.SERVERBOUND) {
+            Listener.getPacketPostScheduleSendPoint().broadcast(packet, this);
         }
-        Listener.getPacketPostScheduleSendPoint().broadcast(packet, this);
     }
 
-    @Inject(method = "sendInternal", at = @At("RETURN"))
-    private void sendPacketPost(Packet<?> packet, ChannelFutureListener listener, boolean flush, CallbackInfo ci) {
-        // do not handle serverbound packet
-        if (this.side == NetworkSide.SERVERBOUND) {
-            return;
+    @WrapMethod(method = "sendInternal")
+    private void onSendPacketPost(
+            Packet<?> packet, ChannelFutureListener listener, boolean flush, Operation<Void> original) {
+        if (this.side != NetworkSide.SERVERBOUND) {
+            if (PacketManager.handleQueueOutPacket(
+                    packet,
+                    (packet2, flush2) -> {
+                        original.call(packet2, listener, flush2);
+                    },
+                    (ClientConnection) (Object) this)) {
+                return;
+            }
         }
-        Listener.getPacketPostSendPoint().broadcast(packet, this);
-        // .handleValue(new Event<>(packet, false, false, (ClientConnection) (Object) this));
+        original.call(packet, listener, flush);
     }
 
     @WrapOperation(
@@ -273,5 +278,10 @@ public abstract class ClientConnectionEvents extends SimpleChannelInboundHandler
         } catch (Throwable e) {
             throw e;
         }
+    }
+
+    @Override
+    public void applyPacket(Packet<?> packet, PacketListener listener) {
+        handlePacket(packet, listener);
     }
 }

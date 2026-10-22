@@ -16,22 +16,25 @@ import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.entry.RegistryEntry;
-import org.jspecify.annotations.Nullable;
 
 public class AttributeUtils {
     public static double getPlayerBlockInteractionRange(PlayerEntity player) {
         return player.getAttributeValue(EntityAttributes.BLOCK_INTERACTION_RANGE);
     }
 
-    public static AttributeContainer getAttributeWith(
-            LivingEntity living, Map<EquipmentSlot, ItemStack> equipmentOverrides) {
-        Map<EquipmentSlot, ItemStack> filterMap = new LinkedHashMap<>(equipmentOverrides);
+    public static AttributeContainer copyAttributes(LivingEntity living) {
         AttributeContainer attributeContainer = new AttributeContainer(
                 DefaultAttributeRegistry.get((EntityType<? extends LivingEntity>) living.getType()));
         attributeContainer.setFrom(living.getAttributes());
-        for (Map.Entry<EquipmentSlot, ItemStack> entry : filterMap.entrySet()) {
-            var slot = entry.getKey();
-            var itemStack2 = entry.getValue();
+        return attributeContainer;
+    }
+
+    public static AttributeContainer getAttributeWith(
+            LivingEntity living, Map<EquipmentSlot, ItemStack> equipmentOverrides) {
+        Map<EquipmentSlot, ItemStack> filterMap = new LinkedHashMap<>(equipmentOverrides);
+        AttributeContainer attributeContainer = copyAttributes(living);
+        for (var slot : EquipmentSlot.values()) {
+            var itemStack2 = equipmentOverrides.getOrDefault(slot, living.getEquippedStack(slot));
             ItemStack toBeRemoved = living.getEquippedStack(slot);
             if (!toBeRemoved.isEmpty()) {
                 toBeRemoved.applyAttributeModifiers(slot, (attribute, modifier) -> {
@@ -51,7 +54,8 @@ public class AttributeUtils {
                 });
             }
         }
-        if (ViaFabricPlusHooks.getInstance().getCurrentVersion().isLowerOrEqualTo(20, 8)) {
+        if (living instanceof PlayerEntity pl
+                && ViaFabricPlusHooks.getInstance().getCurrentVersion().isLowerOrEqualTo(20, 8)) {
             Map<EquipmentSlot, ItemStack> newMap = new HashMap<>(filterMap);
             for (var re : EquipmentSlot.values()) {
                 if (!newMap.containsKey(re)) {
@@ -67,10 +71,6 @@ public class AttributeUtils {
         LivingEntityAccess.of(living).updateEquipmentAttributeChange();
     }
 
-    public static @Nullable Map<EquipmentSlot, ItemStack> getEquipmentChanges() {
-        return null;
-    }
-
     public static List<RegistryEntry<EntityAttribute>> ATTRIBUTES_1_21_1 = List.of(
             MOVEMENT_EFFICIENCY,
             WATER_MOVEMENT_EFFICIENCY,
@@ -78,40 +78,17 @@ public class AttributeUtils {
             SNEAKING_SPEED,
             SUBMERGED_MINING_SPEED,
             ATTACK_KNOCKBACK);
-    //    public static void removeViaFabricAttributes(AttributeContainer container){
-    //        if(ViaFabricPlusHooks.getInstance().getCurrentVersion().isLowerOrEqualTo(20, 8)){
-    //            // < 1.21.1
-    //            for (var re : ATTRIBUTES_1_21_1) {
-    //                var instance = container.getCustomInstance(re);
-    //                if(instance != null && instance.getBaseValue() != 0.0D){
-    //                    instance.setBaseValue(0.0D);
-    //                    instance.clearModifiers();
-    //                }
-    //            }
-    //        }
-    //    }
-    //
-    //    public static void convertVersionedModifierToViaValue(AttributeContainer container){
-    //        if(ViaFabricPlusHooks.getInstance().getCurrentVersion().isLowerOrEqualTo(20, 8)){
-    //            // < 1.21.1
-    //            for (var re : ATTRIBUTES_1_21_1) {
-    //                var instance = container.getCustomInstance(re);
-    //                if(instance != null && instance.getValue() != 0.0D){
-    //                    double value = instance.getValue();
-    //                    instance.setBaseValue(value);
-    //                    instance.clearModifiers();
-    //                }
-    //            }
-    //        }
-    //    }
 
     private static void setAttributeVia(
             AttributeContainer attributeContainer, RegistryEntry<EntityAttribute> attribute, double level) {
         var attributeInstance = attributeContainer.getCustomInstance(attribute);
-        attributeInstance
-                .clearModifiers(); // Minecraft is applying attribute modifiers in some situations, remove them before
-        // we set the base value
-        attributeInstance.setBaseValue(level);
+        if (attributeInstance != null) {
+            attributeInstance
+                    .clearModifiers(); // Minecraft is applying attribute modifiers in some situations, remove them
+            // before
+            // we set the base value
+            attributeInstance.setBaseValue(level);
+        }
     }
 
     private static int getEquipmentLevel(

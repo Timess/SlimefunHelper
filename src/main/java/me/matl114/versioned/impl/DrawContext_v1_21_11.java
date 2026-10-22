@@ -3,16 +3,23 @@ package me.matl114.versioned.impl;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import java.util.*;
 import java.util.List;
+import me.matl114.renderer.TextRenderers;
+import me.matl114.renderer.text.ResourceFontTextDrawer;
+import me.matl114.renderer.text.TextDrawer;
+import me.matl114.renderer.text.VanillaTextDrawer;
 import me.matl114.utils.collections.IndexEntry;
 import me.matl114.versioned.accessors.GuiRendererStateAccess;
 import me.matl114.versioned.api.MatrixStack;
 import me.matl114.versioned.api.VDrawContext;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
+import net.minecraft.client.font.TextRenderer.TextLayerType;
 import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.ScreenRect;
 import net.minecraft.client.gui.render.state.GuiRenderState;
 import net.minecraft.client.gui.render.state.SimpleGuiElementRenderState;
+import net.minecraft.client.gui.render.state.TextGuiElementRenderState;
 import net.minecraft.client.gui.tooltip.HoveredTooltipPositioner;
 import net.minecraft.client.gui.tooltip.TooltipComponent;
 import net.minecraft.client.render.VertexConsumer;
@@ -33,23 +40,25 @@ import org.joml.Vector4f;
 
 public class DrawContext_v1_21_11 implements VDrawContext {
     private final DrawContext drawContext;
-    private final MatrixStack matrixStack;
+    private final MatrixStackImpl matrixStack;
 
     public DrawContext_v1_21_11(DrawContext context) {
         this.drawContext = context;
-        this.matrixStack = MatrixStack.of(context);
+        this.matrixStack = new MatrixStackImpl(context.getMatrices());
     }
 
     @Override
     public DrawContext pushMatrix() {
-        getMatrices().pushMatrix();
-        return this.drawContext;
+        this.matrixStack.pushMatrix();
+        drawContext.getMatrices().pushMatrix();
+        drawContext.getMatrices().set(matrixStack.peek());
+        return drawContext;
     }
 
     @Override
-    public DrawContext popMatrix() {
-        getMatrices().popMatrix();
-        return this.drawContext;
+    public void popMatrix() {
+        drawContext.getMatrices().popMatrix();
+        this.matrixStack.popMatrix();
     }
 
     @Override
@@ -119,31 +128,41 @@ public class DrawContext_v1_21_11 implements VDrawContext {
 
     @Override
     public void drawGuiTexture(Identifier texture, int x, int y, int z, int width, int height) {
-        if (z != 0) {
-            pushLayer(z);
-        }
+        var context = pushMatrix();
         try {
-            this.drawContext.drawGuiTexture(RenderPipelines.GUI_TEXTURED, texture, x, y, width, height, getShaderRGB());
-        } finally {
             if (z != 0) {
-                popLayer();
+                pushLayer(z);
             }
+            try {
+                context.drawGuiTexture(RenderPipelines.GUI_TEXTURED, texture, x, y, width, height, getShaderRGB());
+            } finally {
+                if (z != 0) {
+                    popLayer();
+                }
+            }
+        } finally {
+            popMatrix();
         }
     }
 
     @Override
     public void drawGuiTexture(
             Identifier texture, int i, int j, int k, int l, int x, int y, int z, int width, int height) {
-        if (z != 0) {
-            pushLayer(z);
-        }
+        var context = pushMatrix();
         try {
-            this.drawContext.drawGuiTexture(
-                    RenderPipelines.GUI_TEXTURED, texture, i, j, k, l, x, y, width, height, getShaderRGB());
-        } finally {
             if (z != 0) {
-                popLayer();
+                pushLayer(z);
             }
+            try {
+                context.drawGuiTexture(
+                        RenderPipelines.GUI_TEXTURED, texture, i, j, k, l, x, y, width, height, getShaderRGB());
+            } finally {
+                if (z != 0) {
+                    popLayer();
+                }
+            }
+        } finally {
+            popMatrix();
         }
     }
 
@@ -164,43 +183,142 @@ public class DrawContext_v1_21_11 implements VDrawContext {
 
     @Override
     public Sprite getGuiSprite(Identifier id) {
-        return this.drawContext.spriteAtlasTexture.getSprite(id);
+        var context = pushMatrix();
+        try {
+            return context.spriteAtlasTexture.getSprite(id);
+        } finally {
+            popMatrix();
+        }
     }
 
     @Override
     public void drawTexturedQuad(
             Identifier texture, int x1, int x2, int y1, int y2, int z, float u1, float u2, float v1, float v2) {
-        if (z != 0) {
-            pushLayer(z);
-        }
+        var context = pushMatrix();
         try {
-            this.drawContext.drawTexturedQuad(
-                    RenderPipelines.GUI_TEXTURED, texture, x1, x2, y1, y2, u1, u2, v1, v2, getShaderRGB());
-        } finally {
             if (z != 0) {
-                popLayer();
+                pushLayer(z);
             }
+            try {
+                context.drawTexturedQuad(
+                        RenderPipelines.GUI_TEXTURED, texture, x1, x2, y1, y2, u1, u2, v1, v2, getShaderRGB());
+            } finally {
+                if (z != 0) {
+                    popLayer();
+                }
+            }
+        } finally {
+            popMatrix();
         }
     }
 
     @Override
-    public void drawText(TextRenderer textRenderer, OrderedText text, int x, int y, int color, boolean shadow) {
-        drawContext.drawText(textRenderer, text, x, y, getShaderRGB(color), shadow);
+    public void drawText(TextDrawer textDrawer, OrderedText text, int x, int y, int color, boolean shadow) {
+        var context = pushMatrix();
+        try {
+            TextDrawer currentDrawer = TextRenderers.resolve(textDrawer);
+            if (currentDrawer instanceof VanillaTextDrawer vanillaTextDrawer
+                    && currentDrawer.getClass() == VanillaTextDrawer.class) {
+                context.drawText(vanillaTextDrawer.unwrap(), text, x, y, getShaderRGB(color), false);
+            } else if (currentDrawer instanceof ResourceFontTextDrawer resourceFontTextDrawer) {
+                addTextState(
+                        resourceFontTextDrawer.unwrap(),
+                        resourceFontTextDrawer.withFont(text),
+                        x,
+                        y,
+                        getShaderRGB(color),
+                        false,
+                        resourceFontTextDrawer.getTextYOffset());
+            } else {
+                currentDrawer.draw(
+                        text,
+                        x,
+                        y,
+                        getShaderRGB(color),
+                        false,
+                        matrixStack.peek3D(),
+                        TextLayerType.NORMAL,
+                        0,
+                        15728880);
+            }
+        } finally {
+            popMatrix();
+        }
     }
 
     @Override
-    public void drawText(TextRenderer textRenderer, @Nullable String text, int x, int y, int color, boolean shadow) {
-        drawContext.drawText(textRenderer, text, x, y, getShaderRGB(color), shadow);
+    public void drawText(TextDrawer textDrawer, @Nullable String text, int x, int y, int color, boolean shadow) {
+        if (text == null) {
+            return;
+        }
+        var context = pushMatrix();
+        try {
+            TextDrawer currentDrawer = TextRenderers.resolve(textDrawer);
+            if (currentDrawer instanceof VanillaTextDrawer vanillaTextDrawer
+                    && currentDrawer.getClass() == VanillaTextDrawer.class) {
+                context.drawText(vanillaTextDrawer.unwrap(), text, x, y, getShaderRGB(color), false);
+            } else if (currentDrawer instanceof ResourceFontTextDrawer resourceFontTextDrawer) {
+                addTextState(
+                        resourceFontTextDrawer.unwrap(),
+                        resourceFontTextDrawer.formattedString(text, true),
+                        x,
+                        y,
+                        getShaderRGB(color),
+                        false,
+                        resourceFontTextDrawer.getTextYOffset());
+            } else {
+                currentDrawer.draw(
+                        text,
+                        x,
+                        y,
+                        getShaderRGB(color),
+                        false,
+                        matrixStack.peek3D(),
+                        TextLayerType.NORMAL,
+                        0,
+                        15728880);
+            }
+        } finally {
+            popMatrix();
+        }
+    }
+
+    private void addTextState(
+            TextRenderer textRenderer, OrderedText text, int x, int y, int color, boolean shadow, float yOffset) {
+        if (ColorHelper.getAlpha(color) == 0) {
+            return;
+        }
+        drawContext.state.addText(new TextGuiElementRenderState(
+                textRenderer,
+                text,
+                new Matrix3x2f(drawContext.getMatrices()).translate(0.0F, yOffset),
+                x,
+                y,
+                color,
+                0,
+                shadow,
+                false,
+                drawContext.scissorStack.peekLast()));
     }
 
     @Override
     public void enableScissor(int x, int y, int width, int height) {
-        this.drawContext.enableScissor(x, y, width, height);
+        var context = pushMatrix();
+        try {
+            context.enableScissor(x, y, width, height);
+        } finally {
+            popMatrix();
+        }
     }
 
     @Override
     public void disableScissor() {
-        this.drawContext.disableScissor();
+        var context = pushMatrix();
+        try {
+            context.disableScissor();
+        } finally {
+            popMatrix();
+        }
     }
 
     @Override
@@ -208,42 +326,52 @@ public class DrawContext_v1_21_11 implements VDrawContext {
 
     @Override
     public void fillGuiGradient(int x1, int y1, int x2, int y2, int color1, int color2, int depth) {
-        if (depth != 0) {
-            pushLayer(depth);
-        }
+        var context = pushMatrix();
         try {
-            this.drawContext.fillGradient(x1, y1, x2, y2, getShaderRGB(color1), getShaderRGB(color2));
-        } finally {
             if (depth != 0) {
-                popLayer();
+                pushLayer(depth);
             }
+            try {
+                context.fillGradient(x1, y1, x2, y2, getShaderRGB(color1), getShaderRGB(color2));
+            } finally {
+                if (depth != 0) {
+                    popLayer();
+                }
+            }
+        } finally {
+            popMatrix();
         }
     }
 
     @Override
     public void fillGuiGradient(
             int x1, int y1, int x2, int y2, int color1, int color2, int color3, int color4, int depth) {
-        if (depth != 0) {
-            pushLayer(depth);
-        }
+        var context = pushMatrix();
         try {
-            this.drawContext.state.addSimpleElement(new ColoredQuad2DGuiElementRenderState(
-                    RenderPipelines.GUI,
-                    TextureSetup.empty(),
-                    new Matrix3x2f(this.drawContext.getMatrices()),
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    color1,
-                    color2,
-                    color3,
-                    color4,
-                    this.drawContext.scissorStack.peekLast()));
-        } finally {
             if (depth != 0) {
-                popLayer();
+                pushLayer(depth);
             }
+            try {
+                context.state.addSimpleElement(new ColoredQuad2DGuiElementRenderState(
+                        RenderPipelines.GUI,
+                        TextureSetup.empty(),
+                        new Matrix3x2f(context.getMatrices()),
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        color1,
+                        color2,
+                        color3,
+                        color4,
+                        context.scissorStack.peekLast()));
+            } finally {
+                if (depth != 0) {
+                    popLayer();
+                }
+            }
+        } finally {
+            popMatrix();
         }
     }
 
@@ -361,38 +489,48 @@ public class DrawContext_v1_21_11 implements VDrawContext {
 
     @Override
     public void fill(int x1, int y1, int x2, int y2, int z, int color) {
-        if (z != 0) {
-            pushLayer(z);
-        }
+        var context = pushMatrix();
         try {
-            this.drawContext.fill(x1, y1, x2, y2, getShaderRGB(color));
-        } finally {
             if (z != 0) {
-                popLayer();
+                pushLayer(z);
             }
+            try {
+                context.fill(x1, y1, x2, y2, getShaderRGB(color));
+            } finally {
+                if (z != 0) {
+                    popLayer();
+                }
+            }
+        } finally {
+            popMatrix();
         }
     }
 
     public void lineGuiGradient(int x1, int y1, int x2, int y2, int color1, int color2, int z) {
-        if (z != 0) {
-            pushLayer(z);
-        }
+        var context = pushMatrix();
         try {
-            this.drawContext.state.addSimpleElement(new ColoredLine2DGuiElementRenderState(
-                    Render_v1_21_11.DEBUG_LINES,
-                    TextureSetup.empty(),
-                    new Matrix3x2f(this.drawContext.getMatrices()),
-                    x1,
-                    x2,
-                    y1,
-                    y2,
-                    color1,
-                    color2,
-                    this.drawContext.scissorStack.peekLast()));
-        } finally {
             if (z != 0) {
-                popLayer();
+                pushLayer(z);
             }
+            try {
+                context.state.addSimpleElement(new ColoredLine2DGuiElementRenderState(
+                        Render_v1_21_11.DEBUG_LINES,
+                        TextureSetup.empty(),
+                        new Matrix3x2f(context.getMatrices()),
+                        x1,
+                        x2,
+                        y1,
+                        y2,
+                        color1,
+                        color2,
+                        context.scissorStack.peekLast()));
+            } finally {
+                if (z != 0) {
+                    popLayer();
+                }
+            }
+        } finally {
+            popMatrix();
         }
     }
 
@@ -409,40 +547,63 @@ public class DrawContext_v1_21_11 implements VDrawContext {
     }
 
     @Override
-    public void drawTooltip(TextRenderer textRenderer, List<Text> text, Optional<TooltipData> data, int x, int y) {
+    public void drawTooltip(List<Text> text, Optional<TooltipData> data, int x, int y) {
         var trans = matrixStack.peek3D();
         var point1 = new Vector4f(x, y, 0, 1).mul(trans);
         // Tooltips are draw in delay callback, so transfer before the call
-        List<TooltipComponent> list = (List)
-                text.stream().map(Text::asOrderedText).map(TooltipComponent::of).collect(Util.toArrayList());
-        data.ifPresent((datax) -> {
-            list.add(list.isEmpty() ? 0 : 1, TooltipComponent.of(datax));
-        });
-        if (!list.isEmpty()) {
-            addInternal(() -> {
-                drawContext.drawTooltipImmediately(
-                        textRenderer, list, (int) point1.x, (int) point1.y, HoveredTooltipPositioner.INSTANCE, null);
-            });
+        if (text.isEmpty() && data.isEmpty()) {
+            return;
         }
+        addInternal(() -> {
+            TextRenderer textRenderer = MinecraftClient.getInstance().textRenderer;
+            List<TooltipComponent> list = (List) text.stream()
+                    .map(Text::asOrderedText)
+                    .map(TooltipComponent::of)
+                    .collect(Util.toArrayList());
+            data.ifPresent((datax) -> list.add(list.isEmpty() ? 0 : 1, TooltipComponent.of(datax)));
+            var context = pushMatrix();
+            try {
+                context.drawTooltipImmediately(
+                        textRenderer, list, (int) point1.x, (int) point1.y, HoveredTooltipPositioner.INSTANCE, null);
+            } finally {
+                popMatrix();
+            }
+        });
     }
 
     @Override
     public void drawItem(ItemStack stack, int x, int y, int seed, int z) {
-        if (z != 0) {
-            pushLayer(z);
-        }
+        var context = pushMatrix();
         try {
-            this.drawContext.drawItem(stack, x, y, seed);
-        } finally {
             if (z != 0) {
-                popLayer();
+                pushLayer(z);
             }
+            try {
+                context.drawItem(stack, x, y, seed);
+            } finally {
+                if (z != 0) {
+                    popLayer();
+                }
+            }
+        } finally {
+            popMatrix();
         }
     }
 
     @Override
-    public void drawItemInSlot(
-            TextRenderer textRenderer, ItemStack stack, int x, int y, @Nullable String countOverride) {
-        this.drawContext.drawStackOverlay(textRenderer, stack, x, y, countOverride);
+    public void drawItemInSlot(TextDrawer textDrawer, ItemStack stack, int x, int y, @Nullable String countOverride) {
+        var context = pushMatrix();
+        try {
+            context.drawStackOverlay(getTextRenderer(TextRenderers.resolve(textDrawer)), stack, x, y, countOverride);
+        } finally {
+            popMatrix();
+        }
+    }
+
+    private TextRenderer getTextRenderer(TextDrawer textDrawer) {
+        if (textDrawer instanceof VanillaTextDrawer vanillaTextDrawer) {
+            return vanillaTextDrawer.unwrap();
+        }
+        throw new IllegalArgumentException("TextDrawer must expose a Minecraft TextRenderer");
     }
 }

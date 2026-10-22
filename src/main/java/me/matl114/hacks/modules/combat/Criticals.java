@@ -12,7 +12,6 @@ import me.matl114.events.Listener;
 import me.matl114.events.PacketManager;
 import me.matl114.events.impl.EventContainer;
 import me.matl114.hacks.CombatTasks;
-import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
@@ -20,6 +19,7 @@ import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.move.FloatingUtils;
 import me.matl114.hacks.modules.move.LegacySnapRotManager;
 import me.matl114.hacks.modules.move.PlayerStateManager;
+import me.matl114.hacks.modules.task.MovementManager;
 import me.matl114.hacks.utils.EntityUtils;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
 import me.matl114.hacks.utils.enums.GhostHandMode;
@@ -36,7 +36,6 @@ import me.matl114.versioned.api.VPacket;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.item.ItemStack;
-import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
@@ -106,6 +105,12 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
             .show(() -> mode.get().isIn(Mode.FREEZE))
             .build();
 
+    public final FlagRef stopWallCriticalWhenMoving = flagBuilder(criticals.add("stop-wall-when-moving"))
+            .show(() -> mode.get() == Mode.GRIM_WALL
+                    || (mode.get().isNotIn(Mode.FREEZE, Mode.PACKET) && inWallPacket.get())
+                    || (mode.get() == Mode.FREEZE && inWallFreezeCritical.get()))
+            .build();
+
     public final DoubleRef customInWallJumpFreezeHeight = builder(criticals.add("custom-in-wall-height"), Double.class)
             .defaultValue(0.05)
             .validator(Configs.doubleRange(0, 1))
@@ -121,17 +126,14 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
 
     public final IntRef cooldownCritical = builder(criticals.add("critical-cooldown"), Integer.class)
             .defaultValue(10)
+            .validator(Configs.INT_NONNEGATIVE)
             .build();
 
     static LegalMovementManager.DelegateMovementModifier instance;
 
     public Criticals() {
         super("Criticals");
-        if (instance == null) {
-            instance = new LegalMovementManager.DelegateMovementModifier(this::cast);
-            MovTasks.PLAYER_PIPELINE_0.addMovementModifierFactory(() -> instance);
-        }
-        instance.setDelegate(this::cast);
+        MovementManager.registerMovementPipeline(this);
         bindFlag(enable);
     }
 
@@ -155,7 +157,10 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
     }
 
     private boolean canNotCrit() {
-        return mc.player.isTouchingWater() || mc.player.hasVehicle() || PlayerStateManager.INSTANCE.lastInWeb;
+        return mc.player.isTouchingWater()
+                || mc.player.hasVehicle()
+                || PlayerStateManager.INSTANCE.lastInWeb
+                || PlayerStateManager.INSTANCE.lastSlowByBlock;
     }
 
     public void onPlayerAttack(Event<PlayerInteractEntityC2SPacket> event) {
@@ -187,6 +192,7 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
         if (inWallPacket.get()
                 && (PlayerStateManager.INSTANCE.lastInWall || PlayerStateManager.INSTANCE.lastUnderBlock)
                 && mode.get().isNotIn(Mode.FREEZE, Mode.PACKET)) {
+            if (shouldSkipWallCritical()) return;
             handleCriticalWall(event);
             return;
         }
@@ -197,12 +203,7 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
             case PACKET -> {
                 // do not influence tp
                 if (!CombatTasks.getAttack().canUseTp()) {
-                    if (mc.player.isSprinting()) {
-                        mc.getNetworkHandler()
-                                .sendPacket(new ClientCommandC2SPacket(
-                                        mc.player, ClientCommandC2SPacket.Mode.STOP_SPRINTING));
-                        ClientPlayerAccess.of(mc.player).setLastSprintFlag(false);
-                    }
+                    PlayerStateManager.INSTANCE.sendSprintStatus(false, true);
                     mc.getNetworkHandler().sendPacket(VPacket.newPositionAndOnGround(x, y + 5.0E-4, z, false, false));
                     mc.getNetworkHandler().sendPacket(VPacket.newPositionAndOnGround(x, y + 1.0E-4, z, false, false));
                 }
@@ -240,12 +241,7 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
             }
             case GRIM_GROUND_SIMULATION -> {
                 if (mc.player.isOnGround()) {
-                    if (mc.player.isSprinting()) {
-                        mc.getNetworkHandler()
-                                .sendPacket(new ClientCommandC2SPacket(
-                                        mc.player, ClientCommandC2SPacket.Mode.STOP_SPRINTING));
-                        ClientPlayerAccess.of(mc.player).setLastSprintFlag(false);
-                    }
+                    PlayerStateManager.INSTANCE.sendSprintStatus(false, true);
                     if (!shouldApplyGrimGroundSimulationAutoFakeGround()) {
                         mc.getNetworkHandler()
                                 .sendPacket(VPacket.newPositionAndOnGround(x, y + MIN_HEIGHT_DELTA, z, true, false));
@@ -276,10 +272,19 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
             case GRIM_WALL -> {
                 if (mc.player.isOnGround()
                         && (PlayerStateManager.INSTANCE.lastInWall || PlayerStateManager.INSTANCE.lastUnderBlock)) {
+                    if (shouldSkipWallCritical()) return;
                     handleCriticalWall(event);
                 }
             }
         }
+    }
+
+    private boolean shouldSkipWallCritical() {
+        if (ViaFabricPlusHooks.isSupportEndTick()) return true;
+        if (!stopWallCriticalWhenMoving.get()) return false;
+
+        int movementTick = PlayerStateManager.INSTANCE.lastRealMovementPacketTick;
+        return movementTick >= Tasks.getTick() - 1;
     }
 
     public void handleCriticalWall(Event<PlayerInteractEntityC2SPacket> event) {
@@ -348,7 +353,7 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
             var pkt = cache;
             var stack = cachedHandStack;
             final Vec2f legacySnapTarget = useLegacySnap;
-            PacketManager.schedulePostCallback(event.context, () -> {
+            PacketManager.schedulePostScheduleCallback(event.context, () -> {
                 var weapon = mc.player.getStackInHand(Hand.MAIN_HAND);
                 // Debug.chat("Attack");
                 if (legacySnapTarget != null) {
@@ -412,7 +417,8 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
             how_to_apply:
             {
                 if (inWallFreezeCritical.get()
-                        && (PlayerStateManager.INSTANCE.lastUnderBlock || PlayerStateManager.INSTANCE.lastInWall)) {
+                        && (PlayerStateManager.INSTANCE.lastUnderBlock || PlayerStateManager.INSTANCE.lastInWall)
+                        && !shouldSkipWallCritical()) {
                     // wall shit
                     double jumpMin = customInWallJumpFreezeHeight.get() / 4.0D;
                     Box oldBox = mc.player.dimensions.getBoxAt(movementManagerEvent.context.playerStatus.pos);
@@ -570,6 +576,7 @@ public class Criticals extends BaseModule implements LegalMovementManager.Moveme
     }
 
     public void onModulePreset(Event<EventContainer<ModulePreset>> eventModule) {
+        if (eventModule.context().getValue().isOptionPreset()) return;
         switch (eventModule.context.getValue()) {
             case AC_GRIM_LEGACY -> {
                 if (mode.get().isIn(Mode.PACKET)) {

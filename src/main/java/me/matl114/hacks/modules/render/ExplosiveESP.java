@@ -19,9 +19,10 @@ import me.matl114.managers.config.NBTRef;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.*;
 import me.matl114.utils.render.RenderCollector;
-import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.damage.DamageTypes;
+import net.minecraft.entity.decoration.EndCrystalEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.math.Box;
@@ -57,7 +58,11 @@ public class ExplosiveESP extends BaseModule {
             .defaultValue(new WrapColor(Formatting.LIGHT_PURPLE))
             .build();
 
+    public final FlagRef highlightCrystal =
+            flagBuilder(root.add("highlight-crystal")).build();
+
     private final RenderCollector<Box> boxOutlineCollector = RenderCollectors.createBoxCollector(true, false, false);
+    private final RenderCollector<Entity> faceCollector = RenderCollectors.createEntityFaceCollector();
     private final RenderCollector<RenderElements.Text> textCollector = RenderCollectors.createTextCollector();
     private final RenderCollector<Vec3d> traceCollector = RenderCollectors.createTracerCollector();
 
@@ -69,8 +74,9 @@ public class ExplosiveESP extends BaseModule {
         registerListener(CombatManager.getRequestEnableEvent(), this::onRequestCombatService);
     }
 
-    public void onTick(Event<ClientPlayerEntity> event) {
+    public void onTick() {
         boxOutlineCollector.clear();
+        faceCollector.clear();
         textCollector.clear();
         traceCollector.clear();
         if (checkNull() || !enable.get()) {
@@ -101,13 +107,23 @@ public class ExplosiveESP extends BaseModule {
             if (crystal.getPos().squaredDistanceTo(mc.player.getPos()) > maxDistanceSq) {
                 continue;
             }
-            if (tracingOption.box()) {
-                boxOutlineCollector.submit(crystal.getBoundingBox(), ColorUtils.withAlphaInt(crystalRgb, 160));
-            }
-            if (tracingOption.line()) {
-                traceCollector.submit(crystal.getBoundingBox().getCenter(), ColorUtils.withAlphaInt(crystalRgb, 255));
-            }
+
             submitDamageText(crystal.getPos(), 6.0F, crystalRgb);
+        }
+        for (var crystal : mc.world.getEntities()) {
+            if (crystal instanceof EndCrystalEntity end) {
+                if (highlightCrystal.get()) {
+                    faceCollector.submit(crystal, ColorUtils.withAlphaInt(crystalRgb, 64));
+                }
+                if (tracingOption.box()) {
+                    boxOutlineCollector.submit(crystal.getBoundingBox(), ColorUtils.withAlphaInt(crystalRgb, 160));
+                }
+
+                if (tracingOption.line()) {
+                    traceCollector.submit(
+                            crystal.getBoundingBox().getCenter(), ColorUtils.withAlphaInt(crystalRgb, 255));
+                }
+            }
         }
     }
 
@@ -140,9 +156,10 @@ public class ExplosiveESP extends BaseModule {
         MatrixStack stack = event.context().stack();
         RenderUtils.startDrawVirtual(stack);
         try {
-            textCollector.render3D(stack);
-            boxOutlineCollector.render3D(stack);
-            traceCollector.render3D(stack);
+            textCollector.render3D(stack, event.context().partialTicks());
+            faceCollector.render3D(stack, event.context().partialTicks());
+            boxOutlineCollector.render3D(stack, event.context().partialTicks());
+            traceCollector.render3D(stack, event.context().partialTicks());
         } finally {
             RenderUtils.stopDrawVirtual(stack);
         }

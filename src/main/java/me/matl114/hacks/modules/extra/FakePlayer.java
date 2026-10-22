@@ -7,6 +7,7 @@ import java.util.*;
 import java.util.function.Consumer;
 import javax.annotation.Nullable;
 import me.matl114.accessors.access.PlayerInteractEntityC2SPacketAccess;
+import me.matl114.accessors.events.ClientConnectionAccess;
 import me.matl114.accessors.hacks.EntityInternalAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
@@ -25,10 +26,9 @@ import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
 import me.matl114.managers.config.*;
 import me.matl114.utils.*;
+import net.minecraft.block.BedBlock;
 import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
 import net.minecraft.block.RespawnAnchorBlock;
-import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.damage.DamageSource;
@@ -38,8 +38,8 @@ import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
+import net.minecraft.network.packet.s2c.play.EntityDamageS2CPacket;
 import net.minecraft.network.packet.s2c.play.ExplosionS2CPacket;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.RegistryKey;
@@ -67,8 +67,10 @@ public class FakePlayer extends BaseModule {
 
     public final FlagRef copyEquipment = flagBuilder(root.add("copy-equipment")).build();
 
-    public final DoubleRef maxHealth =
-            doubleBuilder(root.add("max-health")).defaultValue(20.0D).build();
+    public final DoubleRef maxHealth = doubleBuilder(root.add("max-health"))
+            .defaultValue(20.0D)
+            .validator(Configs.doubleRange(0.0D, Double.MAX_VALUE))
+            .build();
 
     public final FlagRef autoTotem = flagBuilder(root.add("auto-totem")).build();
 
@@ -97,19 +99,27 @@ public class FakePlayer extends BaseModule {
         registerListener(
                 Listener.getPacketPoint().getChannel(PlayerInteractEntityC2SPacket.class),
                 this::onHit,
-                Integer.MAX_VALUE);
-        registerListener(Listener.getPacketPreHandlePoint().getChannel(ExplosionS2CPacket.class), this::onExplode);
+                Integer.MIN_VALUE);
+        registerListener(
+                Listener.getPacketPreHandlePoint().getChannel(ExplosionS2CPacket.class),
+                this::onExplode,
+                Integer.MIN_VALUE);
         registerListener(Listener.getPreGameTick(), this::onTickKinetic);
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
         if (mc.world == null) {
-            acceptor.accept(createTitle("widget.fake-player.fake-player-list.enter-world", 0, dblank, dx, dy));
+            acceptor.accept(factory.createTitle("widget.fake-player.fake-player-list.enter-world", 0, dblank, dx, dy));
             return;
         }
-        acceptor.accept(createTitle("widget.fake-player.fake-player-list.title", 0, dblank, dx, dy));
+        acceptor.accept(factory.createTitle("widget.fake-player.fake-player-list.title", 0, dblank, dx, dy));
         DynamicListWidget list = new DynamicListWidget(0, dblank, dx);
         for (var re : mc.world.getEntities()) {
             if (re instanceof FakePlayerEntity fakePlayer) {
@@ -229,17 +239,22 @@ public class FakePlayer extends BaseModule {
 
     public void onDamage(FakePlayerEntity fakePlayer, DamageSource source, float rawDamage) {
         float realDamage = fakePlayer.damage(rawDamage, source);
-        if (realDamage > 0 && logHit.get()) {
-            log(hitLog.get()
-                    .formatText(
-                            fakePlayer.getDisplayName(),
-                            source.getTypeRegistryEntry()
-                                    .getKey()
-                                    .get()
-                                    .getValue()
-                                    .getPath(),
-                            rawDamage,
-                            realDamage));
+        if (realDamage > 0) {
+            var packet = new EntityDamageS2CPacket(fakePlayer, source);
+            ClientConnectionAccess.of(mc.getNetworkHandler().getConnection())
+                    .applyPacket(packet, mc.getNetworkHandler());
+            if (logHit.get()) {
+                log(hitLog.get()
+                        .formatText(
+                                fakePlayer.getDisplayName(),
+                                source.getTypeRegistryEntry()
+                                        .getKey()
+                                        .get()
+                                        .getValue()
+                                        .getPath(),
+                                rawDamage,
+                                realDamage));
+            }
         }
     }
 
@@ -250,17 +265,20 @@ public class FakePlayer extends BaseModule {
             if (PlayerInteractEntityC2SPacketAccess.of(interactEntity.context).isAttack()) {
                 onAttack(fake);
             }
-            mc.getNetworkHandler()
-                    .sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.STOP_SPRINTING));
-            mc.player.setSprinting(false);
+            PlayerStateManager.INSTANCE.sendSprintStatus(false, false);
         }
     }
 
     private void onAttack(FakePlayerEntity fake) {
         ItemStack weapon = mc.player.getStackInHand(Hand.MAIN_HAND);
         // todo: add other types
-        float damage =
-                DamageUtils.getRealAttackDamage(mc.player, fake, weapon, PlayerStateManager.INSTANCE.fallDistance);
+        float damage = DamageUtils.getRealAttackDamage(
+                mc.player,
+                fake,
+                weapon,
+                PlayerStateManager.INSTANCE.fallDistance,
+                PlayerStateManager.INSTANCE.getTicksSinceLastAttack(),
+                false);
         onDamage(fake, DamageUtils.createDirectDamageSource(DamageTypes.PLAYER_ATTACK, mc.player), damage);
     }
 
@@ -275,36 +293,41 @@ public class FakePlayer extends BaseModule {
         if (fakes.isEmpty()) {
             return;
         }
-        Map<BlockPos, BlockState> stateMap = new LinkedHashMap<>();
         BlockPos explodeCenter = BlockPos.ofFloored(event.context.center());
         float radius = event.context.radius();
-        if (Objects.equals(event.context.center(), explodeCenter.toCenterPos())
-                && mc.world.getBlockState(explodeCenter).getBlock() instanceof RespawnAnchorBlock) {
-            stateMap.put(explodeCenter, Blocks.AIR.getDefaultState());
+        BlockState explosionState = mc.world.getBlockState(explodeCenter);
+        boolean centeredExplosion = Objects.equals(event.context.center(), explodeCenter.toCenterPos());
+        boolean respawnAnchor = centeredExplosion && explosionState.getBlock() instanceof RespawnAnchorBlock;
+        boolean bed = centeredExplosion && explosionState.getBlock() instanceof BedBlock;
+        if (respawnAnchor || bed) {
             if (radius <= 0) {
-                radius = 6;
+                radius = respawnAnchor ? ExplosionUtils.RESPAWN_ANCHOR_POWER : ExplosionUtils.BED_POWER;
             }
         } else {
             if (radius <= 0) {
-                radius = 5;
+                radius = ExplosionUtils.END_CRYSTAL_POWER;
             }
         }
+        ExplosionUtils.BlockStateAccess blockAccess =
+                ExplosionUtils.fromWorldWithAutomaticOverrides(mc.world, event.context.center());
         for (var re : fakes) {
             float damage = ExplosionUtils.calculateExplosionRawDamage(
-                    radius,
-                    event.context.center(),
-                    re.getBoundingBox(),
-                    ExplosionUtils.fromWorldWithOverrides(mc.world, stateMap),
-                    ExplosionUtils.ALL_TERRAIN);
+                    radius, event.context.center(), re.getBoundingBox(), blockAccess, ExplosionUtils.ALL_TERRAIN);
             if (damage > 0) {
-                onDamage(re, DamageUtils.createDamageSource(DamageTypes.PLAYER_ATTACK, null, mc.player), damage);
+                onDamage(
+                        re,
+                        DamageUtils.createDamageSource(
+                                respawnAnchor || bed ? DamageTypes.BAD_RESPAWN_POINT : DamageTypes.PLAYER_ATTACK,
+                                null,
+                                mc.player),
+                        damage);
             }
         }
     }
 
     protected Object2LongMap<Entity> piercingCooldowns = new Object2LongOpenHashMap<>();
 
-    private void onTickKinetic(Event<ClientPlayerEntity> event) {
+    private void onTickKinetic() {
         if (checkNull()) return;
         if (SpearEnhance.isUsingSpear(mc.player) && SpearEnhance.canSpearKineticAttack(mc.player)) {
             Vec3d startEye = new Vec3d(

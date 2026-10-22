@@ -6,7 +6,6 @@ import java.util.Map;
 import java.util.Set;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
-import me.matl114.events.impl.SlotClickAction;
 import me.matl114.events.impl.UseItem;
 import me.matl114.events.impl.UseItemOnBlock;
 import me.matl114.hacks.InvTasks;
@@ -21,7 +20,6 @@ import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.InventoryUtils;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -35,11 +33,15 @@ public class InvHelper extends BaseModule {
     }
 
     public final ModulePath root = makePath(Configs.INV_CONFIG, "inv-helper");
-    public final IntRef checkDelay =
-            intBuilder(root.add("check-delay")).defaultValue(2).build();
+    public final IntRef checkDelay = intBuilder(root.add("check-delay"))
+            .defaultValue(2)
+            .validator(Configs.INT_POSITIVE)
+            .build();
 
-    public final IntRef totalOp =
-            intBuilder(root.add("total-operation")).defaultValue(2).build();
+    public final IntRef totalOp = intBuilder(root.add("total-operation"))
+            .defaultValue(2)
+            .validator(Configs.INT_POSITIVE)
+            .build();
 
     public final ModulePath hotBar = root.add("hot-bar");
 
@@ -50,8 +52,10 @@ public class InvHelper extends BaseModule {
                     hotBar.add("auto-stack-hot-bar-hotkey"), new MultiKeyBind(), hotBar.add("auto-stack-hot-bar"))
             .build();
 
-    public final DoubleRef stackPercentage =
-            doubleBuilder(hotBar.add("stack-percentage")).defaultValue(0.25D).build();
+    public final DoubleRef stackPercentage = doubleBuilder(hotBar.add("stack-percentage"))
+            .defaultValue(0.25D)
+            .validator(Configs.doubleRange(0.0D, 1.0D))
+            .build();
 
     public final FlagRef offHandStack =
             flagBuilder(hotBar.add("off-hand-stack")).build();
@@ -76,6 +80,7 @@ public class InvHelper extends BaseModule {
 
     public final DoubleRef resupplyPercentage = doubleBuilder(resupply.add("resupply-percentage"))
             .defaultValue(0.125)
+            .validator(Configs.doubleRange(0.0D, 1.0D))
             .build();
 
     public final ModulePath stacking = root.add("stacking");
@@ -88,6 +93,7 @@ public class InvHelper extends BaseModule {
 
     public final DoubleRef autoMergePercentage = doubleBuilder(stacking.add("auto-merge-percentage"))
             .defaultValue(0.125)
+            .validator(Configs.doubleRange(0.0D, 1.0D))
             .build();
 
     public final KeyBindRef mergeKey = hotkey(stacking.add("stack-inventory-key"))
@@ -121,7 +127,7 @@ public class InvHelper extends BaseModule {
 
     int timer;
 
-    public void onInventoryTick(Event<ClientPlayerEntity> event) {
+    public void onInventoryTick() {
         if (checkNull()) return;
         preTickItems.put(
                 Hand.MAIN_HAND, mc.player.getStackInHand(Hand.MAIN_HAND).copy());
@@ -321,7 +327,7 @@ public class InvHelper extends BaseModule {
     }
 
     // prevent resupply to ghost hand
-    public void onPreSlotClick(Event<SlotClickAction> event) {
+    public void onPreSlotClick() {
         if (InteractManager.INSTANCE.duringInputEvent) {
             hasAnyUse = false;
             hasAnyUseOn = false;

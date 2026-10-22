@@ -7,7 +7,7 @@ import me.matl114.events.*;
 import me.matl114.events.Event;
 import me.matl114.events.impl.Render3D;
 import me.matl114.events.packets.PacketStorage;
-import me.matl114.events.packets.PacketStorageImpl;
+import me.matl114.events.packets.PacketStorageRecvImpl;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.managers.Configs;
@@ -43,13 +43,17 @@ public class BackTrack extends BaseModule {
     public final KeyBindRef hotkey =
             moduleEntry(bt.addHotkey(), new MultiKeyBind(), bt.addEnable()).build();
 
-    public final DoubleRef maxDelay =
-            doubleBuilder(bt.add("max-delay")).defaultValue(50.0D).build();
+    public final DoubleRef maxDelay = doubleBuilder(bt.add("max-delay"))
+            .defaultValue(50.0D)
+            .validator(Configs.doubleRange(0.0D, 1000.0D))
+            .build();
 
     public final FlagRef render = flagBuilder(bt.add("render-old")).build();
 
-    public final DoubleRef maxDistance =
-            doubleBuilder(bt.add("max-distance")).defaultValue(5.0D).build();
+    public final DoubleRef maxDistance = doubleBuilder(bt.add("max-distance"))
+            .defaultValue(5.0D)
+            .validator(Configs.doubleRange(0.0D, 10.0D))
+            .build();
 
     public final FlagRef playerOnly = flagBuilder(bt.add("player-only")).build();
 
@@ -57,7 +61,7 @@ public class BackTrack extends BaseModule {
     public void registerAll() {
         super.registerAll();
         registerListener(PacketManager.getPacketQueueInEvent(), this::onQueuePlayerPosition);
-        registerListener(PacketManager.getQueueShutdownEvent(), this::onShutdownQueue);
+        registerListener(PacketManager.getQueueShutdownEvent(), this::onShutdown);
         registerListener(Listener.getPreTick(), this::onTick);
         registerListener(RenderListener.getRender3DEvent(), this::onRender);
     }
@@ -125,7 +129,7 @@ public class BackTrack extends BaseModule {
                     lastTrackingPosition = currentTarget.getPos();
                 } else if (!TargetSelector.INSTANCE.isWithinAttackRange(
                         mc.player.getPos(),
-                        currentTarget.getBoundingBox(),
+                        currentTarget,
                         CombatExtra.INSTANCE.getAttackAtTargetRange(currentTarget))) {
                     setNoDelay();
                 }
@@ -143,7 +147,7 @@ public class BackTrack extends BaseModule {
         movePlayerEntityTypes.add(PlayPackets.MOVE_ENTITY_POS_ROT);
     }
 
-    public void onQueuePlayerPosition(Event<PacketStorage> event) {
+    public void onQueuePlayerPosition(Event<PacketStorage.Recv> event) {
         if (shouldDelay) {
             long currentMs = System.currentTimeMillis();
             if (event.context.timestampMS() + maxDelay.get() < currentMs) {
@@ -153,7 +157,7 @@ public class BackTrack extends BaseModule {
         }
         if (enable.get() && currentTarget != null && event.<Boolean>getArgs(1)) {
             var storage = event.context;
-            if (storage instanceof PacketStorageImpl impl) {
+            if (storage instanceof PacketStorageRecvImpl impl) {
                 var packet = impl.packet();
                 if (PacketManager.isAsyncOrNotTransactionS2CPacket(packet)) return;
                 if (packet instanceof EntityPositionSyncS2CPacket positionSync
@@ -227,11 +231,7 @@ public class BackTrack extends BaseModule {
         }
     }
 
-    public void onShutdownQueue(Event<Void> event) {
-        onShutdown();
-    }
-
-    public void onTick(Event<Void> eventTick) {
+    public void onTick() {
         if (checkNull()) {
             onShutdown();
             return;

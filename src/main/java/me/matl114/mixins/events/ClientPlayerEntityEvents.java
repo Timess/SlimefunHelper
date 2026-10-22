@@ -10,7 +10,6 @@ import me.matl114.accessors.events.ClientPlayerEntityAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
-import me.matl114.hooks.ViaFabricPlusHooks;
 import me.matl114.managers.Tasks;
 import me.matl114.utils.entity.PlayerInputUtils;
 import net.fabricmc.api.EnvType;
@@ -22,11 +21,11 @@ import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.recipebook.ClientRecipeBook;
 import net.minecraft.client.world.ClientWorld;
+import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.network.packet.Packet;
 import net.minecraft.network.packet.c2s.play.PlayerInputC2SPacket;
 import net.minecraft.stat.StatHandler;
 import net.minecraft.util.PlayerInput;
-import net.minecraft.util.math.Vec2f;
 import net.minecraft.util.math.Vec3d;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -80,6 +79,9 @@ public abstract class ClientPlayerEntityEvents extends AbstractClientPlayerEntit
 
     @Shadow
     private int ticksSinceLastPositionPacketSent;
+
+    @Shadow
+    public abstract boolean shouldSlowDown();
 
     public ClientPlayerEntityEvents(ClientWorld world, GameProfile profile) {
         super(world, profile);
@@ -150,12 +152,6 @@ public abstract class ClientPlayerEntityEvents extends AbstractClientPlayerEntit
         this.movementManager = new LegalMovementManager();
     }
 
-    @Unique
-    private static Vec2f compatMovementVectorWithViaFabric(Vec2f vec2f) {
-        // shit,
-        return ViaFabricPlusHooks.getInstance().getCurrentVersion().isLowerOrEqualTo(21, 4) ? vec2f : vec2f.normalize();
-    }
-
     @Inject(
             method = "tickMovement",
             at = @At(value = "INVOKE", target = "Lnet/minecraft/client/input/Input;tick()V", shift = At.Shift.AFTER))
@@ -169,8 +165,9 @@ public abstract class ClientPlayerEntityEvents extends AbstractClientPlayerEntit
         // changed, update movementVector
         if (!Objects.equals(currentInput, this.input.playerInput)) {
             PlayerInputUtils.Input i0 = new PlayerInputUtils.Input(this.input.playerInput);
-            this.input.movementVector =
-                    compatMovementVectorWithViaFabric(new Vec2f(i0.sidewaysSpeed(), i0.forwardSpeed()));
+            i0.syncMovementVector(
+                    this.input,
+                    this.shouldSlowDown() ? (float) this.getAttributeValue(EntityAttributes.SNEAKING_SPEED) : 1.0F);
         }
     }
 

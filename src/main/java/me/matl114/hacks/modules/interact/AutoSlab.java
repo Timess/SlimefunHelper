@@ -16,8 +16,8 @@ import me.matl114.hacks.InteractionTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
-import me.matl114.hacks.modules.ac.DisablerManager;
 import me.matl114.hacks.modules.inv.InvExtra;
+import me.matl114.hacks.modules.task.DisablerManager;
 import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.config.Regex;
 import me.matl114.hacks.utils.config.WrapColor;
@@ -67,11 +67,15 @@ public class AutoSlab extends BaseModule {
 
     public final FlagRef airplace = flagBuilder(autoPlate.add("air-place")).build();
 
-    public final IntRef delay =
-            intBuilder(autoPlate.add("delay")).defaultValue(5).build();
+    public final IntRef delay = intBuilder(autoPlate.add("delay"))
+            .defaultValue(5)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
-    public final IntRef mul =
-            intBuilder(autoPlate.add("multiply")).defaultValue(1).build();
+    public final IntRef mul = intBuilder(autoPlate.add("multiply"))
+            .defaultValue(1)
+            .validator(Configs.INT_POSITIVE)
+            .build();
 
     public final DoubleRef range = doubleBuilder(autoPlate.add("interact-range"))
             .defaultValue(5.0D)
@@ -110,7 +114,7 @@ public class AutoSlab extends BaseModule {
     public final Set<Block> availableBlocks = new HashSet<>();
     public final RenderCollector<Box> boxCollector = RenderCollectors.createBoxCollector(true, false, false);
 
-    public void onServerLeave(Event<Void> eventLeave) {
+    public void onServerLeave() {
         availableBlocks.clear();
     }
 
@@ -138,10 +142,16 @@ public class AutoSlab extends BaseModule {
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
         acceptor.accept(WidgetUtils.withCondition(
-                createTitle("widget.block-rotate.yaw-deceive.use-argument", 0, dblank, dx, dy), useBlockRotate::get));
+                factory.createTitle("widget.block-rotate.yaw-deceive.use-argument", 0, dblank, dx, dy),
+                useBlockRotate::get));
     }
 
     public void initializeMap() {
@@ -209,7 +219,7 @@ public class AutoSlab extends BaseModule {
         }
     }
 
-    public void onPreInputEvent(Event<Void> event) {
+    public void onPreInputEvent() {
         if (checkNull()) return;
         boxCollector.clear();
         if (enable.get()) {
@@ -226,7 +236,7 @@ public class AutoSlab extends BaseModule {
         if (enable.get() && render.get()) {
             RenderUtils.startDrawVirtual(event.context.stack());
             try {
-                boxCollector.render3D(event.context.stack());
+                boxCollector.render3D(event.context.stack(), event.context.partialTicks());
             } finally {
                 RenderUtils.stopDrawVirtual(event.context.stack());
             }
@@ -250,15 +260,17 @@ public class AutoSlab extends BaseModule {
                         && InteractExtra.INSTANCE.isWithinInteractRange(
                                 mc.player.getPos(), hitResult.val().getBlockPos(), range.get())
                         && InteractUtils.getBlockPlacement(bl, mc.player, mc.world, hitResult.val()) != null) {
+                    if (!InteractionTasks.canHandleInteract(mode.get(), hitResult.val())) break;
                     Runnable runnable = InvExtra.INSTANCE.swapItemToHand(entry.index(), false, GhostHandMode.INV_SWAP);
                     if (runnable == null) break;
                     stack.add(runnable);
                     if (useBlockRotate.get()) {
                         BlockRotate.INSTANCE.addTempStateSchematic(testPos, targetState);
                     }
-                    InteractionTasks.handlePlaceMode(mode.get(), hitResult.val(), Hand.MAIN_HAND, swingHand.get());
+                    boolean completed = InteractionTasks.handlePlaceMode(
+                            mode.get(), hitResult.val(), Hand.MAIN_HAND, swingHand.get());
                     cnt += 1;
-                    if (cnt >= multiply) {
+                    if (!completed || cnt >= multiply) {
                         break;
                     }
                 }
@@ -267,7 +279,7 @@ public class AutoSlab extends BaseModule {
         if (returnBlock.get()) {
             int size = stack.size();
             for (var i = size - 1; i >= 0; i--) {
-                stack.get(i).run();
+                InteractionTasks.finishInteractGhostHand(mode.get(), stack.get(i));
             }
         }
     }
@@ -277,7 +289,12 @@ public class AutoSlab extends BaseModule {
     }
 
     public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
-        mode.set(LegalInteractMode.getFromPreset(event.context.getValue()));
-        airplace.set(!event.context.getValue().hasAC());
+        ModulePreset preset = event.context.getValue();
+        if (preset.isAirplacePreset()) airplace.set(preset.getAirplace(airplace.get()));
+        if (preset.isSwingPlacePreset()) swingHand.set(preset.getSwingPlace(swingHand.get()));
+        if (!preset.isOptionPreset()) {
+            mode.set(LegalInteractMode.getFromPreset(preset));
+            airplace.set(!preset.hasAC());
+        }
     }
 }

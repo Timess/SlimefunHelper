@@ -1,8 +1,6 @@
 package me.matl114.events;
 
 import com.google.common.collect.ImmutableSet;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelPipeline;
 import java.lang.reflect.Modifier;
@@ -286,7 +284,7 @@ public class Listener {
         }
     }
 
-    private static final Function<Class<? extends Screen>, Class<? extends Screen>> screenClassIdentifierMapper =
+    static final Function<Class<? extends Screen>, Class<? extends Screen>> screenClassIdentifierMapper =
             Util.memoize((clz -> {
                 Class<?> clzz = clz;
                 while (clzz != Screen.class && clzz.getSuperclass() != Screen.class) {
@@ -465,10 +463,6 @@ public class Listener {
     @ExtraArgs({ClientConnection.class})
     public static final PacketEventChannel packetPostScheduleSendPoint = new PacketEventChannel();
 
-    @Getter
-    @ExtraArgs({ClientConnection.class})
-    private static final PacketEventChannel packetPostSendPoint = new PacketEventChannel();
-
     @Getter // packet accept or send
     @Cancelable
     @Modifiable
@@ -526,8 +520,7 @@ public class Listener {
 
     @Getter
     @Broadcast
-    @ExtraArgs({BlockPos.class})
-    private static final EventChannel<Vec3d> playerWebSlowPoint = new EventChannel<>();
+    private static final EventChannel<SlowMovement> playerSlowedByBlockPoint = new EventChannel<>();
 
     @Getter
     @Cancelable
@@ -624,6 +617,11 @@ public class Listener {
     @Broadcast
     private static final EventChannelDispatcher<Entity> entityPostTickListener =
             new EventChannelDispatcher<>(Entity::getType);
+
+    @Getter
+    @Broadcast
+    private static final EventChannelDispatcher<PosUpdate> entityTrackedPositionUpdate =
+            new EventChannelDispatcher<>(s -> s.entity().getType());
 
     @Getter
     @Cancelable
@@ -933,20 +931,15 @@ public class Listener {
     // make a method to send packet without event
     public static void sendPacketNoEvents(ClientConnection connection, Packet<?> packet) {
         connection.submit((con) -> {
-            Channel channel = con.channel;
+            var channel = con.channel;
             if (channel.eventLoop().inEventLoop()) {
-                sendInternal(channel, packet);
+                con.sendInternal(packet, ChannelFutureListener.FIRE_EXCEPTION_ON_FAILURE, true);
             } else {
                 channel.eventLoop().execute(() -> {
-                    sendInternal(channel, packet);
+                    con.sendInternal(packet, ChannelFutureListener.FIRE_EXCEPTION_ON_FAILURE, true);
                 });
             }
         });
-    }
-
-    private static void sendInternal(Channel channel, Packet<?> packet) {
-        ChannelFuture channelFuture = channel.writeAndFlush(packet);
-        channelFuture.addListener(ChannelFutureListener.FIRE_EXCEPTION_ON_FAILURE);
     }
 
     public static void onClientConnectionEstablish(Event<ClientConnection> event) {
@@ -980,7 +973,7 @@ public class Listener {
         Listener.getPacketPostHandlePoint()
                 .registerHandler(
                         (Consumer<Event<Packet<?>>>) ev -> onPacketEventCatch(postCatchers, ev), Integer.MIN_VALUE);
-        Listener.getPacketPostSendPoint()
+        Listener.getPacketPostScheduleSendPoint()
                 .registerHandler(
                         (Consumer<Event<Packet<?>>>) ev -> onPacketEventCatch(postCatchers, ev), Integer.MIN_VALUE);
         Listener.getConnectionEstablish()

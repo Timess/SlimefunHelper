@@ -19,6 +19,7 @@ import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
 import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.utils.render.RenderCollectors;
 import me.matl114.managers.Configs;
 import me.matl114.managers.Tasks;
 import me.matl114.managers.config.DoubleRef;
@@ -28,6 +29,7 @@ import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.ColorUtils;
 import me.matl114.utils.Debug;
 import me.matl114.utils.RenderUtils;
+import me.matl114.utils.render.RenderCollector;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
@@ -35,7 +37,6 @@ import net.minecraft.item.BowItem;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
-import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec2f;
 import net.minecraft.util.math.Vec3d;
 
@@ -54,23 +55,26 @@ public class BowTp extends BaseModule {
 
     public DoubleRef tpDistance = builder(bowAtt.add("bowtp-distance"), DoubleRef.TYPE)
             .defaultValue(80.0D)
+            .validator(Configs.doubleRange(-200.0D, 200.0D))
             .build();
 
     public DoubleRef targetingDistance = builder(bowAtt.add("bowtp-target-distance"), DoubleRef.TYPE)
             .defaultValue(80.0D)
+            .validator(Configs.doubleRange(-200.0D, 200.0D))
             .build();
 
     public FlagRef render = flagBuilder(bowAtt.add("bowtp-render-target")).build();
 
     public DoubleRef deltaY = builder(bowAtt.add("bowtp-start-delta-y"), DoubleRef.TYPE)
             .defaultValue(0.0D)
-            .validator(Configs.doubleRange(-1e-7, 100))
+            .validator(Configs.doubleRange(-200, 200))
             .build();
 
     @Override
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getPacketPoint().getChannel(PlayerActionC2SPacket.class), this::onBowAction, -999);
+        registerListener(Listener.getPostGameTick(), this::updateRenderCollector);
         registerListener(RenderListener.getRender3DEvent(), this::onRender);
         registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onModulePreset);
     }
@@ -249,33 +253,33 @@ public class BowTp extends BaseModule {
         return false;
     }
 
-    public void onRender(Event<Render3D> stackE) {
-        var stack = stackE.context;
-        if (enable.get() && mc.player != null && render.get()) {
-            float tickDelta = stack.partialTicks();
-            if (mc.player.isUsingItem() && mc.player.getActiveItem().getItem() instanceof BowItem bow) {
-                // filter bow, but keep shield
-                RenderUtils.startDrawVirtual(stack.stack());
-                try {
-                    var targetSelector = CombatTasks.getTargetSelector();
-                    Entity entity = targetSelector.searchAttackEntity(
-                            targetingDistance.get(), true, e -> targetSelector.checkWeapon(e, true));
-                    if (entity != null) {
-                        float dist = entity.distanceTo(mc.player);
-                        float opacity = Math.min(0.6F, 0.10F + dist * 0.02F);
-                        Box box = RenderUtils.getLerpedBox(entity, tickDelta);
-                        RenderUtils.drawSolidBox(
-                                stack.stack(),
-                                box.getMinPos(),
-                                box.getMaxPos(),
-                                ColorUtils.withAlpha(Color.GREEN, opacity));
-                    }
-                } finally {
-                    RenderUtils.stopDrawVirtual(stack.stack());
-                }
-            }
+    private void updateRenderCollector() {
+        targetCollector.clear();
+        if (!enable.get() || mc.player == null || !render.get()) return;
+        if (!mc.player.isUsingItem() || !(mc.player.getActiveItem().getItem() instanceof BowItem)) return;
+        var targetSelector = CombatTasks.getTargetSelector();
+        Entity entity = targetSelector.searchAttackEntity(
+                targetingDistance.get(), true, e -> targetSelector.checkWeapon(e, true));
+        if (entity != null) {
+            float dist = entity.distanceTo(mc.player);
+            float opacity = Math.min(0.6F, 0.10F + dist * 0.02F);
+            targetCollector.submit(
+                    entity, ColorUtils.withAlpha(Color.GREEN, opacity).getRGB());
         }
     }
+
+    public void onRender(Event<Render3D> stackE) {
+        if (!enable.get() || !render.get() || mc.player == null) return;
+        RenderUtils.startDrawVirtual(stackE.context.stack());
+        try {
+            targetCollector.render3D(stackE.context.stack(), stackE.context.partialTicks());
+        } finally {
+            RenderUtils.stopDrawVirtual(stackE.context.stack());
+        }
+    }
+
+    private final RenderCollector<Entity> targetCollector =
+            RenderCollectors.createEntityBoxCollector(false, true, false);
 
     private double getFireArrowPositionHeight(PlayerEntity player, Entity target) {
         // real height is owner.getEyeY() - 0.10000000149011612
@@ -287,6 +291,7 @@ public class BowTp extends BaseModule {
     }
 
     public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
+        if (event.context().getValue().isOptionPreset()) return;
         ModulePreset preset = event.context().getValue();
         switch (preset) {
             case HACKING, VANILLA -> {

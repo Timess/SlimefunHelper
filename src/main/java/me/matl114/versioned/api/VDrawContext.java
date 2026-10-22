@@ -1,11 +1,10 @@
 package me.matl114.versioned.api;
 
-import java.awt.*;
 import java.util.List;
 import java.util.Optional;
-import javax.annotation.Nonnull;
+import me.matl114.renderer.TextRenderers;
+import me.matl114.renderer.text.TextDrawer;
 import me.matl114.versioned.impl.DrawContext_v1_21_11;
-import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.texture.Sprite;
 import net.minecraft.item.ItemStack;
@@ -16,15 +15,14 @@ import net.minecraft.util.Identifier;
 import org.jetbrains.annotations.Nullable;
 
 public interface VDrawContext {
-    // MatrixStack will be deprecated in the future in GUI drawing, to compat old code, we have to use these wrappers
-    @Nonnull
-    public static VDrawContext of(DrawContext drawContext) {
-        return new DrawContext_v1_21_11(drawContext);
+    public static VDrawContext of(DrawContext context) {
+        return new DrawContext_v1_21_11(context);
     }
-    // These method push and pop DrawContext's matrixStack to ensure that it is same as getMatrices()
+    // MatrixStack will be deprecated in the future in GUI drawing, to compat old code, we have to use these wrappers
+    // Matrix changes stay local until a drawing operation needs the vanilla context.
     public DrawContext pushMatrix();
 
-    public DrawContext popMatrix();
+    public void popMatrix();
 
     public void pushLayer(int depth);
 
@@ -181,18 +179,22 @@ public interface VDrawContext {
 
     public Sprite getGuiSprite(Identifier i);
 
-    default void drawCenteredTextWithShadow(
-            TextRenderer textRenderer, OrderedText text, int centerX, int y, int color) {
-        this.drawText(textRenderer, text, centerX - textRenderer.getWidth(text) / 2, y, color, true);
+    default TextDrawer getTextDrawer() {
+        return TextRenderers.get();
     }
 
-    default void drawTextWithShadow(TextRenderer textRenderer, @Nullable String text, int x, int y, int color) {
-        this.drawText(textRenderer, text, x, y, color, true);
+    default void drawCenteredTextWithShadow(TextDrawer textDrawer, OrderedText text, int centerX, int y, int color) {
+        this.drawText(textDrawer, text, centerX - textDrawer.getWidth(text) / 2, y, color, false);
     }
 
-    public void drawText(TextRenderer textRenderer, OrderedText text, int x, int y, int color, boolean shadow);
+    default void drawTextWithShadow(TextDrawer textDrawer, @Nullable String text, int x, int y, int color) {
+        this.drawText(textDrawer, text, x, y, color, false);
+    }
 
-    public void drawText(TextRenderer textRenderer, @Nullable String text, int x, int y, int color, boolean shadow);
+    public void drawText(TextDrawer textDrawer, OrderedText text, int x, int y, int color, boolean shadow);
+
+    public void drawText(TextDrawer textDrawer, @Nullable String text, int x, int y, int color, boolean shadow);
+
     // just pass the relative coord
     public void enableScissor(int x, int y, int width, int height);
 
@@ -220,10 +222,9 @@ public interface VDrawContext {
 
     public void lineGuiGradient(int x1, int y1, int x2, int y2, int color1, int color2, int depth);
 
-    public void drawTooltip(TextRenderer textRenderer, List<Text> text, Optional<TooltipData> data, int x, int y);
+    public void drawTooltip(List<Text> text, Optional<TooltipData> data, int x, int y);
 
     public void drawItem(ItemStack stack, int x, int y, int seed, int z);
 
-    public void drawItemInSlot(
-            TextRenderer textRenderer, ItemStack stack, int x, int y, @Nullable String countOverride);
+    public void drawItemInSlot(TextDrawer textDrawer, ItemStack stack, int x, int y, @Nullable String countOverride);
 }

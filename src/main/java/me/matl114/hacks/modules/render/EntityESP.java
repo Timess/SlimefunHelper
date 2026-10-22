@@ -2,7 +2,6 @@ package me.matl114.hacks.modules.render;
 
 import java.awt.*;
 import java.util.*;
-import java.util.List;
 import me.matl114.accessors.hacks.EntityInternalAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
@@ -18,15 +17,14 @@ import me.matl114.managers.Configs;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.*;
+import me.matl114.utils.render.RenderCollector;
 import me.matl114.versioned.api.VDrawContext;
-import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.registry.Registries;
 import net.minecraft.text.TextColor;
 import net.minecraft.util.Formatting;
-import net.minecraft.util.math.Box;
 
 public class EntityESP extends BaseModule {
     public final ModulePath entityRoot = makePath(Configs.RENDER_CONFIG, "detect-entity");
@@ -121,14 +119,18 @@ public class EntityESP extends BaseModule {
         registerListener(Listener.getPostGameTick(), this::onTick);
     }
 
-    List<Entity> entities = new ArrayList<>();
+    private final RenderCollector<Entity> renderOutline = RenderCollectors.createEntityBoxCollector(true, false, false);
+    private final RenderCollector<Entity> renderFace = RenderCollectors.createEntityFaceCollector();
+    private final RenderCollector<Entity> entityTracer = RenderCollectors.createEntityTracerCollector();
 
-    public void onTick(Event<ClientPlayerEntity> event) {
-        entities = new ArrayList<>();
+    public void onTick() {
+        renderOutline.clear();
+        renderFace.clear();
+        entityTracer.clear();
+
         boolean enable = this.enable.get();
 
         var whitelist = whiteList.get().set();
-        var glowMap = highLightSettings.get();
         for (Entity entity : mc.world.getEntities()) {
             if (entity == mc.gameRenderer.getCamera().getFocusedEntity()) continue;
             if (entity == null || entity.isRemoved()) {
@@ -136,24 +138,15 @@ public class EntityESP extends BaseModule {
             } else {
                 EntityInternalAccess<?> access = EntityInternalAccess.of(entity);
                 int renderLevel = access.renderTrackedLevel();
-                if (!glowMap.getEntryValueOr(entity.getType(), false)) {
-                    access.setGlow0(false);
-                }
                 if (renderLevel == EntityInternalAccess.RENDER_LEVEL_WHITELIST) {
                     if (!whitelist.contains(entity.getType())) {
-                        access.setGlow0(false);
                         access.markRenderTracked(EntityInternalAccess.RENDER_LEVEL_DISABLE);
                         continue;
                     }
                 }
                 if ((renderLevel == EntityInternalAccess.RENDER_LEVEL_WHITELIST && enable)
                         || renderLevel == EntityInternalAccess.RENDER_LEVEL_FORCE) {
-                    if (glowMap.getEntryValueOr(entity.getType(), false)) {
-                        if (!entity.isGlowing()) {
-                            access.setGlow0(true);
-                        }
-                    }
-                    entities.add(entity);
+                    updateRenderCollectors(entity);
                 }
                 if (renderLevel == EntityInternalAccess.RENDER_LEVEL_DISABLE) {
                     if (whitelist.contains(entity.getType())) {
@@ -189,33 +182,30 @@ public class EntityESP extends BaseModule {
     }
 
     public void render(Object object, float tickDelta) {
-        var lineMap = renderTraceSettings.get();
-        var boxMap = renderBoxSettings.get();
-        var renderBox = RenderCollectors.createBoxCollector(true, false, false);
-        var renderTrace = RenderCollectors.createTracerCollector();
-        List<Entity> entities = this.entities;
-        for (var entity : entities) {
-            Color color = getShaderColorByEntityType(entity);
-            if (color != null) {
-
-                Box box = RenderUtils.getLerpedBox(entity, tickDelta);
-                if (boxMap.getEntryValueOr(entity.getType(), false)) {
-                    renderBox.submit(box, color.getRGB());
-                }
-                if (lineMap.getEntryValueOr(entity.getType(), false)) {
-                    renderTrace.submit(box.getCenter(), color.getRGB());
-                }
-            }
-        }
         if (object instanceof MatrixStack stack) {
-            renderBox.render3D(stack);
-            renderTrace.render3D(stack);
+            renderFace.render3D(stack, tickDelta);
+            renderOutline.render3D(stack, tickDelta);
+            entityTracer.render3D(stack, tickDelta);
         } else if (object instanceof VDrawContext vdraw) {
-            renderBox.render2D(vdraw);
-            renderTrace.render2D(vdraw);
+            renderFace.render2D(vdraw, tickDelta);
+            renderOutline.render2D(vdraw, tickDelta);
+            entityTracer.render2D(vdraw, tickDelta);
         }
-        renderBox.clear();
-        renderTrace.clear();
+    }
+
+    private void updateRenderCollectors(Entity entity) {
+        Color color = getShaderColorByEntityType(entity);
+        if (color == null) return;
+
+        if (renderBoxSettings.get().getEntryValueOr(entity.getType(), false)) {
+            renderOutline.submit(entity, color.getRGB());
+        }
+        if (highLightSettings.get().getEntryValueOr(entity.getType(), false)) {
+            renderFace.submit(entity, ColorUtils.withAlphaInt(color.getRGB(), 32));
+        }
+        if (renderTraceSettings.get().getEntryValueOr(entity.getType(), false)) {
+            entityTracer.submit(entity, color.getRGB());
+        }
     }
 
     private Color getShaderColorByEntityType(Entity entity) {

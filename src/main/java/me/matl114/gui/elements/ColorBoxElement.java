@@ -44,14 +44,14 @@ public class ColorBoxElement extends BoxElement {
         if (text1 != null) {
             RenderHandler.drawScaledText0(
                     context,
-                    mc.textRenderer,
+                    context.getTextDrawer(),
                     text1,
                     0,
                     0,
                     element.getTextureWidth(),
                     element.getTextureHeight(),
                     textSampler.getColorInt(),
-                    0);
+                    text.getAlign(element));
         }
         Integer color = (highLightProvider == null)
                 ? (shouldHighlight ? Integer.valueOf(Colors.WHITE) : null)

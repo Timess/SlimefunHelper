@@ -264,6 +264,7 @@ public class EntityUtils {
     }
 
     public static float rotationToYaw(Vec3d vec) {
+        vec = vec.normalize();
         return (float) Math.toDegrees(Math.atan2(-vec.x, vec.z));
     }
 
@@ -284,6 +285,7 @@ public class EntityUtils {
     }
 
     public static float rotationToPitch(Vec3d vec) {
+        vec = vec.normalize();
         return (float) Math.toDegrees(Math.asin(-vec.y));
     }
 
@@ -456,6 +458,24 @@ public class EntityUtils {
             return new Vec3d(
                     vec3d.x * (double) g - vec3d.z * (double) f, vec3d.y, vec3d.z * (double) g + vec3d.x * (double) f);
         }
+    }
+
+    public static Vec2f movementInputToRotation(Vec3d movementInput, float yaw) {
+        double horizontal = Math.sqrt(movementInput.x * movementInput.x + movementInput.z * movementInput.z);
+
+        if (horizontal < 1.0E-7) {
+            if (Math.abs(movementInput.y) < 1.0E-7) {
+                return new Vec2f(0.0F, yaw);
+            }
+
+            return new Vec2f(movementInput.y > 0.0 ? -90.0F : 90.0F, yaw);
+        }
+
+        float inputYaw = (float) Math.toDegrees(Math.atan2(-movementInput.x, movementInput.z));
+
+        float pitch = (float) Math.toDegrees(-Math.atan2(movementInput.y, horizontal));
+
+        return new Vec2f(pitch, yaw + inputYaw);
     }
 
     public static void smoothPlayerInputState() {}

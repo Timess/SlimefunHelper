@@ -9,9 +9,12 @@ import me.matl114.events.Listener;
 import me.matl114.events.annotations.Cancelable;
 import me.matl114.events.channels.EventChannelDispatcher;
 import me.matl114.events.impl.BlockBreak;
+import me.matl114.events.impl.EventContainer;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.api.ModulePreset;
 import me.matl114.hacks.modules.interact.InteractExtra;
+import me.matl114.hacks.modules.interact.SequencedActionManager;
 import me.matl114.hacks.modules.inv.InvExtra;
 import me.matl114.hacks.modules.move.FloatingUtils;
 import me.matl114.hacks.modules.move.LegacySnapRotManager;
@@ -29,7 +32,6 @@ import me.matl114.utils.entity.PlayerInputUtils;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
-import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
 import net.minecraft.registry.Registries;
@@ -108,6 +110,12 @@ public class PacketMine extends BaseModule {
         super.registerAll();
         registerListener(Listener.getPreGameTick(), this::onTick);
         registerListener(Listener.getMineBlockAction(), this::onMineBlockAction);
+        registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onModulePreset);
+    }
+
+    public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
+        ModulePreset preset = event.context.getValue();
+        if (preset.isMultitaskPreset()) eatingAbort.set(preset.getEatingAbort(eatingAbort.get()));
     }
 
     public boolean hasMiningTarget() {
@@ -136,7 +144,7 @@ public class PacketMine extends BaseModule {
         }
     }
 
-    public void onTick(Event<ClientPlayerEntity> tickEvent) {
+    public void onTick() {
         if (isActive()) {
             if (checkNull()) return;
             if (eatingAbort.get() && mc.player.isUsingItem()) {
@@ -159,54 +167,57 @@ public class PacketMine extends BaseModule {
             BlockBreak postMineCallback = null;
             float progress = 0;
             if (InteractExtra.INSTANCE.isWithinInteractRange(mc.player.getPos(), pos)) {
-                BlockState blockState = mc.world.getBlockState(pos);
-                IndexEntry<ItemStack> currentItemSlot = getCurrentUsableTool(blockState);
+                boolean waitingACK = realBreak.get() && SequencedActionManager.INSTANCE.isWaitingStopBreakResponse(pos);
+                if (!waitingACK) {
+                    BlockState blockState = mc.world.getBlockState(pos);
+                    IndexEntry<ItemStack> currentItemSlot = getCurrentUsableTool(blockState);
 
-                ItemStack currentTool = currentItemSlot.val();
-                if (canMine(blockState, currentTool)) {
-                    progress = PlayerInteractionAccess.of(mc.interactionManager)
-                            .predictCurrentMiningProgressWithTool(currentTool);
-                    Event<BlockBreak> eventPre =
-                            new Event<>(new BlockBreak(pos, BlockBreak.Stage.PRE, currentTool, progress), true, false);
-                    packetMineAction.handleValue(eventPre);
-                    if (!eventPre.isCancelled()) {
-                        if (groundDeceive.get() && !mc.player.isOnGround()) {
-                            boolean shouldExecute = true;
-                            if (groundOnlyWhenNoControl.get()
-                                    && !PlayerInputUtils.of(mc.options).hasMovementControl()) {
-                                shouldExecute = false;
+                    ItemStack currentTool = currentItemSlot.val();
+                    if (canMine(blockState, currentTool)) {
+                        progress = PlayerInteractionAccess.of(mc.interactionManager)
+                                .predictCurrentMiningProgressWithTool(currentTool);
+                        Event<BlockBreak> eventPre = new Event<>(
+                                new BlockBreak(pos, BlockBreak.Stage.PRE, currentTool, progress), true, false);
+                        packetMineAction.handleValue(eventPre);
+                        if (!eventPre.isCancelled()) {
+                            if (groundDeceive.get() && !mc.player.isOnGround()) {
+                                boolean shouldExecute = true;
+                                if (groundOnlyWhenNoControl.get()
+                                        && !PlayerInputUtils.of(mc.options).hasMovementControl()) {
+                                    shouldExecute = false;
+                                }
+                                if (shouldExecute) {
+
+                                    mc.getNetworkHandler()
+                                            .sendPacket(LegacySnapRotManager.INSTANCE.createSnapAt(
+                                                    PlayerStateManager.INSTANCE.lastPitch,
+                                                    PlayerStateManager.INSTANCE.lastYaw,
+                                                    true));
+                                    FloatingUtils.INSTANCE.setGrimFloatingTick(true);
+                                    FloatingUtils.INSTANCE.setForceOnGroundVia(true);
+                                }
                             }
-                            if (shouldExecute) {
+                            Runnable callback =
+                                    InvExtra.INSTANCE.swapItemToHand(currentItemSlot.index(), false, ghostHand.get());
 
-                                mc.getNetworkHandler()
-                                        .sendPacket(LegacySnapRotManager.INSTANCE.createSnapAt(
-                                                PlayerStateManager.INSTANCE.lastPitch,
-                                                PlayerStateManager.INSTANCE.lastYaw,
-                                                true));
-                                FloatingUtils.INSTANCE.setGrimFloatingTick(true);
-                                FloatingUtils.INSTANCE.setForceOnGroundVia(true);
+                            for (int i = 0; i < multiplePackets.get(); ++i) {
+                                if (swingHand.get())
+                                    mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
+                                PlayerInteractionAccess.of(mc.interactionManager)
+                                        .sendBreakPacket(pos, !(realBreak.get() && progress > 0.7F));
                             }
+                            currentTickCallback = callback;
+                            postMineCallback = eventPre.context();
                         }
-                        Runnable callback =
-                                InvExtra.INSTANCE.swapItemToHand(currentItemSlot.index(), false, ghostHand.get());
-
-                        for (int i = 0; i < multiplePackets.get(); ++i) {
-                            if (swingHand.get())
-                                mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
-                            PlayerInteractionAccess.of(mc.interactionManager)
-                                    .sendBreakPacket(pos, !(realBreak.get() && progress > 0.7F));
-                        }
-                        currentTickCallback = callback;
-                        postMineCallback = eventPre.context();
                     }
                 }
             }
             if (autoToolDoubleBreak.get()
                     && PlayerInteractionAccess.of(mc.interactionManager).getCurrentFailBreakPos() != null) {
-                MineExtra.INSTANCE.tickGhostHandDoubleBreak(currentTickCallback, groundDeceive.get());
+                MineExtra.INSTANCE.tickGhostHandDoubleBreak(currentTickCallback, ghostHand.get(), groundDeceive.get());
             } else {
                 if (currentTickCallback != null) {
-                    currentTickCallback.run();
+                    MineExtra.INSTANCE.finishMineGhostHand(currentTickCallback);
                 }
             }
             if (postMineCallback != null) {

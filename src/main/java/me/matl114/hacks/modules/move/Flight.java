@@ -9,6 +9,7 @@ import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
+import me.matl114.hacks.modules.task.MovementManager;
 import me.matl114.hacks.utils.EntityUtils;
 import me.matl114.hacks.utils.HotKeyUtils;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
@@ -19,6 +20,7 @@ import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.Debug;
 import me.matl114.utils.entity.PlayerInputUtils;
+import me.matl114.versioned.api.VPacket;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.player.PlayerAbilities;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
@@ -36,11 +38,7 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
     public Flight() {
         super("Flight");
         bindFlag(canFly);
-        if (instance == null) {
-            instance = new LegalMovementManager.DelegateMovementModifier(this::cast);
-            MovTasks.PLAYER_PIPELINE_0.addMovementModifierFactory(() -> instance);
-        }
-        instance.setDelegate(this::cast);
+        MovementManager.registerMovementPipeline(this);
     }
 
     public final FlagRef canFly =
@@ -64,8 +62,14 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
     public final FlagRef doAntiKick =
             builder(flight.add("antikick"), Boolean.class).defaultValue(true).build();
 
-    public final IntRef antiKickPeriod =
-            intBuilder(flight.add("antikick-period")).defaultValue(60).build();
+    public final EnumRef<AntiKickMode> antiKickMode = builder(flight.add("antikick-mode"), AntiKickMode.class)
+            .defaultValue(AntiKickMode.PACKET)
+            .build();
+
+    public final IntRef antiKickPeriod = intBuilder(flight.add("antikick-period"))
+            .defaultValue(60)
+            .validator(Configs.INT_POSITIVE)
+            .build();
     public final FlagRef overrideFlySpeed = builder(moveSpeed.add("fly-speed"), Boolean.class)
             .defaultValue(false)
             .build();
@@ -200,7 +204,9 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
         boolean handled =
                 switch (flightMode.get()) {
                     case CREATIVE -> {
-                        dispatchAntiKick(player);
+                        if (antiKickMode.get() != AntiKickMode.PACKET) {
+                            dispatchAntiKick(player);
+                        }
                         yield true;
                     }
                     case MOTION -> {
@@ -242,7 +248,9 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
                     }
                 };
         if (!handled && isActive() && mc.player.getAbilities().flying) {
-            dispatchAntiKick(player);
+            if (antiKickMode.get() != AntiKickMode.PACKET) {
+                dispatchAntiKick(player);
+            }
         }
     }
 
@@ -280,6 +288,9 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
             ClientPlayerAccess.of(player).resyncOnGround();
             lastTimeModifyOnGround = onGround ? 1 : 2;
         }
+        if (antiKickMode.get() == AntiKickMode.PACKET) {
+            dispatchAntiKickPacket(player);
+        }
     }
 
     public boolean isInMiningAction() {
@@ -311,6 +322,8 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
     private static final double antiKickOffset = 0.032D;
     // antikick module
     private int antiKickCount = 0;
+    private int antiKickPacketTicksRemaining = 0;
+    private int lastAntiKickPacketTick = -1;
     private double antiKickOffset0;
     private boolean escapeMotionReset = false;
     private double preservedLastMotion = 0.0D;
@@ -356,10 +369,47 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
 
     public Vec3d dispatchAntiKickMotion(Vec3d controlMotion) {
         boolean fakeGilde = false;
-        if ((fakeGilde || (isActive() && doAntiKick.get()))) {
+        if (antiKickMode.get() != AntiKickMode.PACKET && (fakeGilde || (isActive() && doAntiKick.get()))) {
             return processAntiKickMotion(controlMotion, fakeGilde);
         }
         return controlMotion;
+    }
+
+    private void dispatchAntiKickPacket(ClientPlayerEntity player) {
+        if (!isActive() || !doAntiKick.get()) {
+            antiKickCount = 0;
+            antiKickPacketTicksRemaining = 0;
+            return;
+        }
+        boolean seenAsFloating = MovTasks.seenAsFloating(false);
+        if (!seenAsFloating && antiKickPacketTicksRemaining == 0) {
+            antiKickCount = 0;
+            return;
+        }
+
+        int currentTick = Tasks.getTick();
+        if (lastAntiKickPacketTick == currentTick) {
+            return;
+        }
+        if (antiKickPacketTicksRemaining == 0) {
+            if (++antiKickCount <= antiKickPeriod.get()) {
+                return;
+            }
+            antiKickCount = 0;
+            antiKickPacketTicksRemaining = 2;
+        }
+
+        Vec3d currentPos = player.getPos();
+        Vec3d simulatedMovement = MovTasks.simulateMovement(player, currentPos, new Vec3d(0, 0.1, 0), true);
+        Vec3d packetPos = currentPos.add(simulatedMovement);
+        mc.getNetworkHandler()
+                .sendPacket(VPacket.newPositionAndOnGround(
+                        packetPos.x, packetPos.y, packetPos.z, player.isOnGround(), false));
+
+        Vec3d simulatedMovement2 = MovTasks.simulateMovement(player, packetPos, new Vec3d(0, -0.1, 0), true);
+        mc.player.setPosition(packetPos.add(simulatedMovement2));
+        lastAntiKickPacketTick = currentTick;
+        antiKickPacketTicksRemaining--;
     }
 
     double lastFloatingPosition = 0.0D;
@@ -435,7 +485,7 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
         //        }
     }
 
-    public void onInterceptFlyInput(Event<PlayerInputC2SPacket> inputPacketEvent) {
+    public void onInterceptFlyInput() {
         //        if(fake1.get() && !serverSideCanFly && mc.player.getAbilities().flying){
         //            // hack fly
         //            inputPacketEvent.cancel();
@@ -460,6 +510,7 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
     }
 
     public void onPresetLoad(Event<EventContainer<ModulePreset>> presetEvent) {
+        if (presetEvent.context().getValue().isOptionPreset()) return;
         var modulePreset = presetEvent.context().getValue();
         switch (modulePreset) {
             case AC_GRIM, AC_GRIM_LEGACY, AC_MATRIX -> {
@@ -493,6 +544,16 @@ public class Flight extends BaseModule implements LegalMovementManager.MovementM
         @Override
         public String getConfigEnumType() {
             return "flight_mode";
+        }
+    }
+
+    public enum AntiKickMode implements ConfigEnum {
+        MOTION,
+        PACKET;
+
+        @Override
+        public String getConfigEnumType() {
+            return "flight_antikick_mode";
         }
     }
 }

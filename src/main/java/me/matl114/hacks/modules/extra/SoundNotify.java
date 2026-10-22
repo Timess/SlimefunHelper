@@ -53,7 +53,11 @@ public class SoundNotify extends BaseModule {
     private static final int SOUND_COOLDOWN_TICKS = 10;
     public static SoundNotify INSTANCE;
 
-    public final ModulePath path = makePath(Configs.EXTRA_CONFIG, "other.sound-notify");
+    public final ModulePath path = makePath(Configs.EXTRA_CONFIG, "sounds.sound-notify");
+
+    {
+        portConfigs(makePath(Configs.EXTRA_CONFIG, "other.sound-notify"), path);
+    }
 
     public SoundNotify() {
         super("SoundNotify");
@@ -81,8 +85,10 @@ public class SoundNotify extends BaseModule {
                     effectWarnPath.add("effects"), EntrySet.<StatusEffect>parameter())
             .defaultValue(new EntrySet<>(Registries.STATUS_EFFECT, List.of()))
             .build();
-    public final IntRef effectWarnDuration =
-            intBuilder(effectWarnPath.add("duration-ticks")).defaultValue(200).build();
+    public final IntRef effectWarnDuration = intBuilder(effectWarnPath.add("duration-ticks"))
+            .defaultValue(200)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
     public final NBTRef<Holder<SoundEvent>> effectWarnSound = soundBuilder(effectWarnPath, EFFECT_WARN_SOUND);
 
     private final ModulePath messagePath = path.add("message-detection");
@@ -110,11 +116,14 @@ public class SoundNotify extends BaseModule {
     private final ModulePath durabilityPath = path.add("durability");
     public final FlagRef durabilityWarn =
             flagBuilder(durabilityPath.addEnable()).build();
-    public final IntRef durabilityThresholdValue =
-            intBuilder(durabilityPath.add("threshold")).defaultValue(10).build();
+    public final IntRef durabilityThresholdValue = intBuilder(durabilityPath.add("threshold"))
+            .defaultValue(10)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
     public final DoubleRef durabilityThresholdPercentage = doubleBuilder(durabilityPath.add("threshold-percentage"))
             .defaultValue(0.1)
+            .validator(Configs.doubleRange(0.0D, 1.0D))
             .build();
     public final NBTRef<Holder<SoundEvent>> durabilitySound = soundBuilder(durabilityPath, DURABILITY_SOUND);
 
@@ -263,7 +272,7 @@ public class SoundNotify extends BaseModule {
         }
     }
 
-    public void onPostTick(Event<Void> event) {
+    public void onPostTick() {
         if (checkNull()) return;
         if (!enable.get()) {
             alertedEffects.clear();
@@ -384,7 +393,7 @@ public class SoundNotify extends BaseModule {
         }
     }
 
-    public void onDisconnect(Event<Void> event) {
+    public void onDisconnect() {
         alertedEffects.clear();
         resetDurabilityTracking();
         for (TimerExecutor timer : soundTimers.values()) {
@@ -393,9 +402,14 @@ public class SoundNotify extends BaseModule {
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
-        acceptor.accept(createExecuteButton(
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
+        acceptor.accept(factory.createExecuteButton(
                 "widget.sound-notify.test-usage", ButtonAction.run(this::playTestSound), 0, dblank, dx, dy));
     }
 

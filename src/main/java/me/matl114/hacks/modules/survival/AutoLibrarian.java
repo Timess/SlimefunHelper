@@ -38,6 +38,7 @@ import net.minecraft.client.gui.screen.ingame.MerchantScreen;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.enchantment.Enchantment;
 import net.minecraft.enchantment.Enchantments;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.passive.VillagerEntity;
@@ -113,6 +114,7 @@ public class AutoLibrarian extends BaseModule {
     public void registerAll() {
         super.registerAll();
         registerListener(Listener.getPreHandleInputEvents(), this::onPreInputEvent);
+        registerListener(Listener.getPostGameTick(), this::updateRenderCollector);
         registerListener(RenderListener.getRender3DEvent(), this::onRender);
     }
 
@@ -120,18 +122,23 @@ public class AutoLibrarian extends BaseModule {
     final AdjustmentSchedular adjustmentSchedular = new AdjustmentSchedular();
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
-        acceptor.accept(createTitle("widget.interact.interact-all.use-argument", 0, dblank, dx, dy));
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
+        acceptor.accept(factory.createTitle("widget.interact.interact-all.use-argument", 0, dblank, dx, dy));
         if (mc.getNetworkHandler() != null) {
-            acceptor.accept(createExecuteButton(
+            acceptor.accept(factory.createExecuteButton(
                     "widget.auto-librarian.set-min-price",
                     ButtonAction.run(this::setLowestPriceForAllEnchantments),
                     0,
                     dblank,
                     dx,
                     dy));
-            acceptor.accept(createExecuteButton(
+            acceptor.accept(factory.createExecuteButton(
                     "widget.auto-librarian.fill-all-enchantment",
                     ButtonAction.run(this::setAllEnchantments),
                     0,
@@ -191,6 +198,20 @@ public class AutoLibrarian extends BaseModule {
 
     VillagerEntity targetVillager;
     BlockPos targetWorkStationBase;
+    private final RenderCollector<Entity> renderCollector =
+            RenderCollectors.createEntityBoxCollector(true, false, false);
+    private final RenderCollector<Box> boxCollector = RenderCollectors.createBoxCollector(true, false, false);
+
+    private void updateRenderCollector() {
+        renderCollector.clear();
+        boxCollector.clear();
+        if (checkNull() || !enable.get() || !render.get() || targetVillager == null || targetWorkStationBase == null) {
+            return;
+        }
+        renderCollector.submit(targetVillager, renderColor.get().withAlpha(255));
+        boxCollector.submit(
+                new Box(targetWorkStationBase.add(0, 1, 0)), renderColor.get().withAlpha(255));
+    }
 
     @Override
     public void onDisableModule() {
@@ -262,7 +283,7 @@ public class AutoLibrarian extends BaseModule {
         return;
     }
 
-    public void onPreInputEvent(Event<Void> event) {
+    public void onPreInputEvent() {
         if (checkNull()) return;
         if (enable.get()) {
             refreshTarget();
@@ -277,17 +298,10 @@ public class AutoLibrarian extends BaseModule {
     public void onRender(Event<Render3D> event) {
         if (enable.get() && render.get()) {
             if (targetVillager != null && targetWorkStationBase != null) {
-                float partialTicks = event.context.partialTicks();
                 RenderUtils.startDrawVirtual(event.context.stack());
                 try {
-                    RenderCollector<Box> collector = RenderCollectors.createBoxCollector(true, false, false);
-                    collector.submit(
-                            RenderUtils.getLerpedBox(targetVillager, partialTicks),
-                            renderColor.get().withAlpha(255));
-                    collector.submit(
-                            new Box(targetWorkStationBase.add(0, 1, 0)),
-                            renderColor.get().withAlpha(255));
-                    collector.render3D(event.context.stack());
+                    renderCollector.render3D(event.context.stack(), event.context.partialTicks());
+                    boxCollector.render3D(event.context.stack(), event.context.partialTicks());
                 } finally {
                     RenderUtils.stopDrawVirtual(event.context.stack());
                 }

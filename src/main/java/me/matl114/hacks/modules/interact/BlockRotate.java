@@ -28,7 +28,6 @@ import me.matl114.utils.*;
 import net.minecraft.block.*;
 import net.minecraft.block.enums.BlockFace;
 import net.minecraft.block.enums.Orientation;
-import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.item.Item;
 import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
@@ -47,12 +46,8 @@ public class BlockRotate extends BaseModule {
 
     public BlockRotate() {
         super("BlockRotate");
-        bindFlag(enable);
         INSTANCE = this;
     }
-
-    public final FlagRef enable =
-            builder(blockRotate.add("enable"), Boolean.class).defaultValue(true).build();
 
     public final EnumRef<BypassMode> bypassMode = builder(blockRotate.add("yaw-deceive-bypass-mode"), BypassMode.class)
             .defaultValue(BypassMode.NO_BYPASS)
@@ -91,18 +86,18 @@ public class BlockRotate extends BaseModule {
     }
 
     public boolean enableBlockRotateModify() {
-        return enable3.get() || enable2.get();
+        return enable3.get() || enable2.get() || enable4.get();
     }
 
     final Map<BlockPos, TemporarySchematic> tempSchematics = new ConcurrentHashMap<>();
 
-    public void onWorldChange(Event<World> eventWorld) {
+    public void onWorldChange() {
         tempSchematics.clear();
     }
 
     int timer = 0;
 
-    public void onUpdate(Event<ClientPlayerEntity> eventUpdate) {
+    public void onUpdate() {
         if (timer++ > 20) {
             timer = 0;
             var iter = tempSchematics.entrySet().iterator();
@@ -128,12 +123,12 @@ public class BlockRotate extends BaseModule {
     // can not bypass
     public void onPreSendInteractBlockRotate(Event<PlayerInteractBlockC2SPacket> e) {
         if (e.isCancelled()) return;
-        if (enable.get() && enableBlockRotateModify()) {
+        if (enableBlockRotateModify()) {
             if (e.context instanceof PlayerInteractBlockC2SPacketAccess paccess) {
                 //
                 Vec2f currentPy = new Vec2f(PlayerStateManager.INSTANCE.lastPitch, PlayerStateManager.INSTANCE.lastYaw);
                 PitchYawDeceive deceivePy = null;
-                Vec3d lookRot = null;
+                BlockPos lookRot = null;
                 if (paccess.hasUseContext()) {
                     Event<PitchYawDeceive> yawDeceive = new Event<>(new PitchYawDeceive(), false, true);
                     Event<BlockPos> playerLookAt = new Event<>(null, false, true);
@@ -159,7 +154,7 @@ public class BlockRotate extends BaseModule {
                         deceivePy = yawDeceive.context;
                     }
                     if (playerLookAt.context != null) {
-                        lookRot = InteractionTasks.createBlockRayCastDirection(playerLookAt.context);
+                        lookRot = playerLookAt.context;
                     }
                 }
                 if (deceivePy != null
@@ -190,8 +185,11 @@ public class BlockRotate extends BaseModule {
                                                 .getCurrentVersion()
                                                 .isLowerOrEqualTo(20, 8)))) {
                     if (ViaFabricPlusHooks.isSupportDupRot()) {
-                        var packet = LegacySnapRotManager.INSTANCE.createSnapAt(lookRot);
-                        PacketManager.schedulePostSendPacket(e.context, packet);
+                        BlockPos lookRot0 = lookRot;
+                        PacketManager.schedulePostScheduleCallback(
+                                e.context,
+                                () -> LegacySnapRotManager.INSTANCE.snapAt(
+                                        InteractionTasks.createBlockRayCastDirection(lookRot0), false));
                     } else {
                         InteractionTasks.addPostRotationCorrectTask(lookRot, Runnables.doNothing());
                     }
@@ -271,16 +269,17 @@ public class BlockRotate extends BaseModule {
                         access.setPos(easyPlaceResult.getPos());
                     }
                 }
-                if (legal.get()
-                        && !RaycastUtils.canRaycastHit(
-                                mc.player,
-                                PlayerStateManager.INSTANCE.lastPitch,
-                                PlayerStateManager.INSTANCE.lastYaw,
-                                packetHitResult.getBlockPos(),
-                                InteractExtra.INSTANCE.getBlockReachDistance())) {
+                handleYawDeceive(litematicaState, yawDeceive.context);
+                if ((legal.get()
+                                && !RaycastUtils.canRaycastHit(
+                                        mc.player,
+                                        PlayerStateManager.INSTANCE.lastPitch,
+                                        PlayerStateManager.INSTANCE.lastYaw,
+                                        packetHitResult.getBlockPos(),
+                                        InteractExtra.INSTANCE.getBlockReachDistance()))
+                        || yawDeceive.context != null) {
                     look.context(packetHitResult.getBlockPos());
                 }
-                handleYawDeceive(litematicaState, yawDeceive.context);
             }
             RenderTasks.debugBlockHitResult(packetHitResult);
         }
@@ -292,17 +291,19 @@ public class BlockRotate extends BaseModule {
             World litematicaWorld = LitematicaHooks.getInstance().getSchematicWorld();
             if (!LitematicaHooks.getInstance().isPositionWithinRange(pos)) return;
             BlockState litematicaState = litematicaWorld.getBlockState(pos);
-            if (legal.get()
-                    && !RaycastUtils.canRaycastHit(
-                            mc.player,
-                            PlayerStateManager.INSTANCE.lastPitch,
-                            PlayerStateManager.INSTANCE.lastYaw,
-                            pos,
-                            InteractExtra.INSTANCE.getBlockReachDistance())) {
-                look.context(pos);
-            }
+
             if (litematicaState.getBlock() == newState.getBlock() && litematicaState != newState) {
                 handleYawInteractDeceive(litematicaState, yawDeceive.context);
+            }
+            if ((legal.get()
+                            && !RaycastUtils.canRaycastHit(
+                                    mc.player,
+                                    PlayerStateManager.INSTANCE.lastPitch,
+                                    PlayerStateManager.INSTANCE.lastYaw,
+                                    pos,
+                                    InteractExtra.INSTANCE.getBlockReachDistance()))
+                    || yawDeceive.context != null) {
+                look.context(pos);
             }
         }
     }
@@ -353,6 +354,7 @@ public class BlockRotate extends BaseModule {
     }
 
     public void onPresetLoad(Event<EventContainer<ModulePreset>> e) {
+        if (e.context().getValue().isOptionPreset()) return;
         switch (e.context.getValue()) {
             case AC_GRIM, AC_GRIM_LEGACY -> bypassMode.set(BypassMode.BYPASS_GRIM);
             default -> bypassMode.set(BypassMode.NO_BYPASS);

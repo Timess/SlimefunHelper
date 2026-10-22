@@ -4,9 +4,9 @@ import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.impl.MouseScrollAction;
 import me.matl114.events.impl.Teleportation;
-import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.modules.task.MovementManager;
 import me.matl114.hacks.utils.EntityUtils;
 import me.matl114.hacks.utils.config.NBTTypes;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
@@ -36,11 +36,7 @@ public class Freecam extends BaseModule implements LegalMovementManager.Movement
     public Freecam() {
         super("Freecam");
         bindFlag(enable);
-        if (instance == null) {
-            instance = new LegalMovementManager.DelegateMovementModifier(this::cast);
-            MovTasks.PLAYER_PIPELINE_0.addMovementModifierFactory(() -> instance);
-        }
-        instance.setDelegate(this::cast);
+        MovementManager.registerMovementPipeline(this);
     }
 
     public final FlagRef enable = flagBuilder(freecam.add("enable")).build();
@@ -97,7 +93,7 @@ public class Freecam extends BaseModule implements LegalMovementManager.Movement
         removeCamera();
     }
 
-    public void onWorldSwitch(Event<ClientPlayerEntity> event) {
+    public void onWorldSwitch() {
         if (enable.get()) {
             Tasks.scheduleDelayed(this::initializeCamera, 1);
         }
@@ -130,7 +126,7 @@ public class Freecam extends BaseModule implements LegalMovementManager.Movement
         displayEntity = null;
     }
 
-    public void onTick(Event<ClientPlayerEntity> event) {
+    public void onTick() {
         if (camera == null || mc.world == null) return;
         // nop
         // mc.world.tickEntity(camera);
@@ -167,6 +163,9 @@ public class Freecam extends BaseModule implements LegalMovementManager.Movement
     }
 
     public void onScrollSpeedAdjust(Event<MouseScrollAction> event) {
+        if (mc.currentScreen != null) {
+            return;
+        }
         if (enable.get() && camera != null && speedAdjust.get().isPresent()) {
             currentSpeed = Math.clamp(
                     currentSpeed + event.context.vertical() * speedAdjust.get().getValue(), 0.0D, 1000.0D);

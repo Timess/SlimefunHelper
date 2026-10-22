@@ -1,24 +1,27 @@
 package me.matl114.gui.elements;
 
+import me.matl114.gui.Constants;
 import me.matl114.gui.basic.ButtonAction;
+import me.matl114.gui.basic.ColorSampler;
 import me.matl114.gui.basic.DrawableWidget;
 import me.matl114.gui.basic.RenderHandler;
 import me.matl114.gui.basic.TextProvider;
 import me.matl114.versioned.api.VDrawContext;
 import net.minecraft.text.OrderedText;
-import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
 
 public class ButtonElement extends IconElement.SimpleIconElement {
     private final TextProvider provider;
-
-    public static final Identifier BUTTON = new Identifier("slimefunhelper", "gui/button");
-    public static final Identifier BUTTON_HIGHLIGHT = new Identifier("slimefunhelper", "gui/button_highlighted");
-    public static final Identifier BUTTON_INACTIVE = new Identifier("slimefunhelper", "gui/button_disabled");
+    private final ColorSampler textColor;
 
     public ButtonElement(TextProvider provider, ButtonAction action) {
-        super(BUTTON_INACTIVE, BUTTON, true, action);
+        this(provider, action, ColorSampler.WHITE);
+    }
+
+    public ButtonElement(TextProvider provider, ButtonAction action, ColorSampler textColor) {
+        super(Constants.BUTTON_INACTIVE_SPRITE, Constants.BUTTON_SPRITE, true, action);
         this.provider = provider;
+        this.textColor = textColor;
     }
 
     public void renderCentered0(
@@ -30,19 +33,19 @@ public class ButtonElement extends IconElement.SimpleIconElement {
             float alpha,
             boolean shouldHighlight) {
         super.renderCentered0(element, context, mouseX, mouseY, delta, alpha, shouldHighlight);
-        int i = 16777215;
+        int i = textColor.getColorInt();
         OrderedText a = provider.getLabel(element);
         if (a != null) {
             RenderHandler.drawScaledText0(
                     context,
-                    mc.textRenderer,
+                    context.getTextDrawer(),
                     a,
                     0,
                     0,
                     element.getTextureWidth(),
                     element.getTextureHeight(),
                     i | MathHelper.ceil(alpha * 255.0F) << 24,
-                    0);
+                    provider.getAlign(element));
         }
     }
 

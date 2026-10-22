@@ -15,10 +15,11 @@ import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.impl.CombatPlayer;
 import me.matl114.events.impl.MetadataUpdate;
-import me.matl114.events.impl.SlotClickAction;
-import me.matl114.hacks.ACTasks;
+import me.matl114.events.impl.SlowMovement;
 import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
+import me.matl114.hacks.modules.task.PostManager;
+import me.matl114.hacks.modules.task.ServerFeature;
 import me.matl114.hacks.utils.EntityUtils;
 import me.matl114.hooks.ViaFabricPlusHooks;
 import me.matl114.managers.Tasks;
@@ -31,14 +32,13 @@ import me.matl114.versioned.api.VDataFlag;
 import me.matl114.versioned.api.VPacket;
 import me.matl114.versioned.api.VRecord;
 import net.minecraft.block.BlockState;
-import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.block.Blocks;
 import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.*;
 import net.minecraft.enchantment.Enchantments;
 import net.minecraft.entity.*;
 import net.minecraft.entity.attribute.AttributeContainer;
-import net.minecraft.entity.attribute.DefaultAttributeRegistry;
 import net.minecraft.entity.effect.StatusEffect;
 import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
@@ -89,7 +89,8 @@ public class PlayerStateManager extends BaseModule {
     public int lastAttackStrengthResetTick = 0;
     public int lastStartGlidingTick = 0;
     public boolean lastMovementContainsPosition = false;
-    boolean lastTickHasMovement = false;
+    public boolean lastTickHasMovement = false;
+    public int lastRealMovementPacketTick = Integer.MIN_VALUE;
     public boolean lastClimbing;
     public boolean lastInLava;
     public boolean lastInWater;
@@ -98,7 +99,9 @@ public class PlayerStateManager extends BaseModule {
     public boolean realInLava;
     public boolean lastLavaPush;
     public boolean lastInWeb;
+    public boolean lastSlowByBlock;
     private boolean inWeb;
+    private boolean slowByBlock;
     public boolean lastInWall;
     public boolean lastUnderBlock;
     public boolean lastHasGroundSupport;
@@ -111,6 +114,7 @@ public class PlayerStateManager extends BaseModule {
     public Map<ItemStackSample, Integer> inventoryTotalSummary;
     public int glidingTicks;
     public int lastActiveTicks;
+    public ItemStack lastItemInMainHand = ItemStack.EMPTY;
     private static final int MAX_SIZE = 20;
 
     {
@@ -126,6 +130,10 @@ public class PlayerStateManager extends BaseModule {
     public PlayerStateManager() {
         super("PlayerStateManager");
         INSTANCE = this;
+    }
+
+    public boolean hasResistance() {
+        return mc.player != null && mc.player.hasStatusEffect(StatusEffects.RESISTANCE);
     }
 
     @Override
@@ -149,9 +157,9 @@ public class PlayerStateManager extends BaseModule {
                 Listener.getPacketPostHandlePoint().getChannel(PlayerPositionLookS2CPacket.class),
                 this::onPostPlayerPositionLook,
                 Integer.MAX_VALUE);
-        registerListener(Listener.getPlayerWebSlowPoint(), this::handleInWeb);
+        registerListener(Listener.getPlayerSlowedByBlockPoint(), this::handleInWeb);
         registerListener(Listener.getPlayerFluidVelocityPoint(), this::handleInFluid);
-        registerListener(Listener.getPreGameTick(), this::onPreGameTick);
+        registerListener(Listener.getPreGameTick(), this::handleTick);
         registerListener(
                 Listener.getClientPlayerSendMovementPoint(), this::onPrePlayerSendMovePacket, Integer.MAX_VALUE);
         registerListener(
@@ -162,9 +170,12 @@ public class PlayerStateManager extends BaseModule {
                 Listener.getPacketPoint().getChannel(ClientCommandC2SPacket.class),
                 this::onPlayerCommand,
                 Integer.MAX_VALUE);
-        registerListener(Listener.getPlayerInitConfiguration(), this::onPlayerInitialize);
+        registerListener(Listener.getPlayerInitConfiguration(), this::onPlayerReset);
         registerListener(
-                Listener.getPacketPoint().getChannel(ClientTickEndC2SPacket.class), this::onTickEnd, Integer.MAX_VALUE);
+                Listener.getPacketPoint().getChannel(ClientTickEndC2SPacket.class),
+                this::onTickEnd,
+                Integer.MAX_VALUE,
+                true);
         registerListener(Listener.getPreGameTick(), this::updateOtherPlayers);
         registerListener(Listener.getPacketPoint().getChannel(EntityStatusS2CPacket.class), this::onTotemPop);
         registerListener(Listener.getServerLeavePoint(), this::onLeave);
@@ -205,14 +216,27 @@ public class PlayerStateManager extends BaseModule {
                 Listener.getPacketPoint().getChannel(UpdateSelectedSlotC2SPacket.class),
                 this::onSelectedSlot,
                 Integer.MAX_VALUE);
+        registerListener(Listener.getPacketPoint().getChannel(PlayerInteractBlockC2SPacket.class), this::updateAFK);
+        registerListener(Listener.getPacketPoint().getChannel(PlayerInteractItemC2SPacket.class), this::updateAFK);
+
         registerListener(
-                Listener.getPacketPoint().getChannel(PlayerInteractBlockC2SPacket.class), this::onInteractBlock);
-        registerListener(Listener.getPacketPoint().getChannel(PlayerInteractItemC2SPacket.class), this::onInteract);
+                Listener.getPacketPoint().getChannel(PlayerActionC2SPacket.class),
+                this::onPlayerAction,
+                Integer.MAX_VALUE);
+        registerListener(
+                Listener.getPacketPoint().getChannel(UpdateSelectedSlotC2SPacket.class),
+                this::detectEquipmentChanges,
+                Integer.MAX_VALUE,
+                true);
+        registerListener(Listener.getPostClickSlot(), this::detectEquipmentChanges, Integer.MAX_VALUE);
     }
 
     public void onMove(Event<PlayerMoveC2SPacket> event) {
         if (event.isCancelled()) return;
         PlayerMoveC2SPacket packet = event.context;
+        if (PlayerMoveC2SPacketAccess.of(packet).getCause() != PlayerMoveC2SPacketAccess.Cause.LEGACY_SNAP) {
+            lastRealMovementPacketTick = Tasks.getTick();
+        }
         if (PlayerMoveC2SPacketAccess.of(packet).getCause() != PlayerMoveC2SPacketAccess.Cause.TRIGGER_SIMULATION) {
             lastMovementContainsPosition = packet.changesPosition();
 
@@ -327,7 +351,7 @@ public class PlayerStateManager extends BaseModule {
             return;
         }
         Vec3d velocity = VPacket.getVelocity(eventVC.context);
-        ACTasks.addPostTransactionAction(s -> lastKnownClientVelocity = velocity);
+        PostManager.INSTANCE.addNextTransactionAction(s -> lastKnownClientVelocity = velocity);
     }
 
     public void onPostPlayerExplosion(Event<ExplosionS2CPacket> eventBoom) {
@@ -335,7 +359,8 @@ public class PlayerStateManager extends BaseModule {
         var exp = eventBoom.context;
         if (exp.playerKnockback().isPresent()) {
             Vec3d knockBack = exp.playerKnockback().get();
-            ACTasks.addPostTransactionAction(s -> lastKnownClientVelocity = lastKnownClientVelocity.add(knockBack));
+            PostManager.INSTANCE.addNextTransactionAction(
+                    s -> lastKnownClientVelocity = lastKnownClientVelocity.add(knockBack));
         }
     }
 
@@ -349,15 +374,11 @@ public class PlayerStateManager extends BaseModule {
         }
     }
 
-    public void onPrePlayerSendMovePacket(Event<ClientPlayerEntity> eventPre) {
+    public void onPrePlayerSendMovePacket() {
         // force resync
         if (isRotationDifferent()) {
             ClientPlayerAccess.of(mc.player).setLastRot(lastPitch, lastYaw);
         }
-    }
-
-    public void onPlayerInitialize(Event<ClientPlayerEntity> event) {
-        onPlayerReset();
     }
 
     private static boolean containsInvalidValues(double x, double y, double z) {
@@ -453,10 +474,15 @@ public class PlayerStateManager extends BaseModule {
         lastOnGround = onGround;
     }
 
-    public void handleInWeb(Event<Vec3d> vec3dEvent) {
+    public void handleInWeb(Event<SlowMovement> event) {
         fallDistance = 0.0;
-        lastInWeb = true;
-        inWeb = true;
+        if (event.context.state().isOf(Blocks.COBWEB)) {
+            lastInWeb = true;
+            inWeb = true;
+        } else {
+            lastSlowByBlock = true;
+            slowByBlock = true;
+        }
     }
 
     public void handleInFluid(Event<Vec3d> vec3dEvent) {
@@ -469,10 +495,6 @@ public class PlayerStateManager extends BaseModule {
             realInLava = true;
             lastLavaPush = true;
         }
-    }
-
-    public void onPreGameTick(Event<ClientPlayerEntity> event) {
-        handleTick();
     }
 
     private BlockPos calculateVelocityAffectingPos() {
@@ -530,6 +552,8 @@ public class PlayerStateManager extends BaseModule {
         lastClimbing = mc.player.isClimbing();
         lastInWeb = inWeb;
         inWeb = false;
+        lastSlowByBlock = slowByBlock;
+        slowByBlock = false;
         lastWaterPush = realInWater;
         realInWater = false;
         // fix error fluid state caused by reverting
@@ -599,6 +623,15 @@ public class PlayerStateManager extends BaseModule {
         } else {
             glidingTicks = 0;
         }
+        // update lastItem for tick before
+        ItemStack stack = mc.player.getStackInHand(Hand.MAIN_HAND);
+        if (!ItemStack.areEqual(stack, lastItemInMainHand)) {
+            if (!ItemStack.areItemsEqual(stack, lastItemInMainHand)) {
+                lastAttackStrengthResetTick = Tasks.getTick() - 1;
+            }
+            lastItemInMainHand = stack;
+        }
+        detectEquipmentChanges();
     }
 
     public void onEntityAttackEvent(Event<EntityDamageS2CPacket> eventS2C) {
@@ -631,7 +664,7 @@ public class PlayerStateManager extends BaseModule {
         }
     }
 
-    public void onSwingHand(Event<HandSwingC2SPacket> event) {
+    public void onSwingHand() {
         lastAttackStrengthResetTick = Tasks.getTick();
         updateAFK();
     }
@@ -644,12 +677,33 @@ public class PlayerStateManager extends BaseModule {
         }
     }
 
-    public void onInteractBlock(Event<PlayerInteractBlockC2SPacket> event) {
-        updateAFK();
+    public void onPlayerAction(Event<PlayerActionC2SPacket> event) {
+        if (event.isCancelled()) return;
+        switch (event.context.getAction()) {
+            case RELEASE_USE_ITEM, DROP_ITEM, DROP_ALL_ITEMS, SWAP_ITEM_WITH_OFFHAND -> detectEquipmentChanges();
+            default -> {
+                return;
+            }
+        }
     }
 
-    public void onInteract(Event<PlayerInteractItemC2SPacket> event) {
-        updateAFK();
+    public void detectEquipmentChanges() {
+        if (!ServerFeature.INSTANCE.attributeSwap.get() && ServerFeature.INSTANCE.trackClientAttrUpdate.get()) {
+            AttributeUtils.updateAttribute(mc.player);
+        }
+        if (ServerFeature.INSTANCE.attackStrengthUpdateWithHand.get()) {
+            ItemStack stack = mc.player.getStackInHand(Hand.MAIN_HAND);
+            if (!ItemStack.areEqual(stack, lastItemInMainHand)) {
+                if (!ItemStack.areItemsEqual(stack, lastItemInMainHand)) {
+                    lastAttackStrengthResetTick = Tasks.getTick();
+                }
+                lastItemInMainHand = stack;
+            }
+        }
+    }
+
+    public int getTicksSinceLastAttack() {
+        return Tasks.getTick() - lastAttackStrengthResetTick;
     }
 
     public void handleMaceSmash() {
@@ -666,19 +720,19 @@ public class PlayerStateManager extends BaseModule {
         updateAFK();
     }
 
-    public void onClickSlot(Event<SlotClickAction> eventClick) {
+    public void onClickSlot() {
         cooldownInvSummary = 100;
     }
 
-    public void onInventoryUpdate(Event<InventoryS2CPacket> event) {
+    public void onInventoryUpdate() {
         cooldownInvSummary = 100;
     }
 
-    public void onInventorySlotUpdate(Event<ScreenHandlerSlotUpdateS2CPacket> event) {
+    public void onInventorySlotUpdate() {
         cooldownInvSummary = 100;
     }
 
-    public void onInventoryClose(Event<CloseHandledScreenC2SPacket> event) {
+    public void onInventoryClose() {
         cooldownInvSummary = 100;
     }
 
@@ -701,6 +755,7 @@ public class PlayerStateManager extends BaseModule {
         lastZ = 0.0D;
         lastOnGround = false;
         lastPlayerOnGround = false;
+        lastRealMovementPacketTick = Integer.MIN_VALUE;
         lastPitch = 0.0F;
         lastYaw = 0.0F;
         lastSprint = false;
@@ -711,11 +766,11 @@ public class PlayerStateManager extends BaseModule {
         glidingTicks = 0;
         lastStartGlidingTick = 0;
         lastSelectedSlot = 0;
+        lastItemInMainHand = ItemStack.EMPTY;
         updateAFK();
     }
 
-    public void onTickEnd(Event<ClientTickEndC2SPacket> tickEndPacket) {
-        if (tickEndPacket.isCancelled()) return;
+    public void onTickEnd() {
         if (!lastTickHasMovement) {
             lastKnownMovementSpeed = Vec3d.ZERO;
             lastMovementContainsPosition = false;
@@ -767,7 +822,7 @@ public class PlayerStateManager extends BaseModule {
         setPlayerYawSafe(entity, newYaw);
     }
 
-    public void sendSprintStatus(boolean sprint) {
+    public void sendSprintStatus(boolean sprint, boolean vanillaResync) {
         if (sprint != lastSprint) {
             if (sprint) {
                 mc.getNetworkHandler()
@@ -777,6 +832,10 @@ public class PlayerStateManager extends BaseModule {
                         .sendPacket(new ClientCommandC2SPacket(mc.player, ClientCommandC2SPacket.Mode.STOP_SPRINTING));
             }
             ClientPlayerAccess.of(mc.player).setLastSprintFlag(sprint);
+            mc.player.setSprinting(sprint);
+            if (vanillaResync) {
+                PlayerInputManager.INSTANCE.addSprintModifier(0, !sprint, 1);
+            }
         }
     }
 
@@ -812,7 +871,7 @@ public class PlayerStateManager extends BaseModule {
         return re == null ? 0 : re;
     }
 
-    public void updateOtherPlayers(Event<ClientPlayerEntity> eventUpdate) {
+    public void updateOtherPlayers() {
         for (var player : mc.world.getPlayers()) {
             if (player instanceof MetadataHolder metadataHolder) {
                 PlayerStatus status = getOrCreateStatus(player);
@@ -872,7 +931,7 @@ public class PlayerStateManager extends BaseModule {
         }
     }
 
-    public void onLeave(Event<Void> event) {
+    public void onLeave() {
         popMap.clear();
         onPlayerReset();
     }
@@ -1193,9 +1252,7 @@ public class PlayerStateManager extends BaseModule {
         public final Set<ItemStackSample> trackedInventoryItems = new HashSet<>();
         // todo: add more shit
         public void tickUpdate(PlayerEntity player) {
-            AttributeContainer container = new AttributeContainer(
-                    DefaultAttributeRegistry.get((EntityType<? extends LivingEntity>) player.getType()));
-            container.setFrom(player.getAttributes());
+            AttributeContainer container = AttributeUtils.getAttributeWith(player, Map.of());
             this.attributeSnapShot = container;
             int protection = 0;
             int blastProtection = 0;

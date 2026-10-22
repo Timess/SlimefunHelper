@@ -12,7 +12,7 @@ import me.matl114.hacks.InteractionTasks;
 import me.matl114.hacks.RenderTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
-import me.matl114.hacks.modules.ac.DisablerManager;
+import me.matl114.hacks.modules.task.DisablerManager;
 import me.matl114.managers.Configs;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
@@ -86,7 +86,7 @@ public class Airplace extends BaseModule {
         registerListener(Listener.getItemUseAction(), this::onInteract);
         registerListener(Listener.getPreHandleInputEvents(), this::onInput);
         registerListener(RenderListener.getRender3DEvent(), this::onRenderPos);
-        registerListener(PacketManager.getQueueShutdownEvent(), this::onShutdownQueue);
+        registerListener(PacketManager.getQueueShutdownEvent(), this::clearCurrentAirWall);
     }
 
     @Override
@@ -126,10 +126,6 @@ public class Airplace extends BaseModule {
         }
     }
 
-    public void onShutdownQueue(Event<Void> event) {
-        clearCurrentAirWall();
-    }
-
     public void onSwitch() {
         clearCurrentAirWall();
     }
@@ -149,7 +145,7 @@ public class Airplace extends BaseModule {
 
     BlockPos targetPos = null;
 
-    public void onInput(Event<Void> event) {
+    public void onInput() {
         onInputGrimWall();
         onInputFastWall();
     }

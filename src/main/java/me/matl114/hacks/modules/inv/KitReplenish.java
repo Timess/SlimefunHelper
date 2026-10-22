@@ -14,12 +14,12 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.annotation.Nonnull;
 import lombok.With;
-import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.gui.WidgetUtils;
 import me.matl114.gui.basic.*;
 import me.matl114.gui.complex.config.ListModifyWidget;
 import me.matl114.gui.complex.invcache.InventoryViewScreen;
+import me.matl114.gui.interfaces.ElementFactory;
 import me.matl114.gui.presets.lists.ListEntryWidgetController;
 import me.matl114.gui.presets.single.CenterScreen;
 import me.matl114.gui.presets.single.ConfirmingWidgetScreen;
@@ -28,11 +28,11 @@ import me.matl114.hacks.InvTasks;
 import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
-import me.matl114.hacks.modules.ac.DisablerManager;
 import me.matl114.hacks.modules.interact.Interact;
 import me.matl114.hacks.modules.interact.InteractExtra;
 import me.matl114.hacks.modules.interact.SequencedActionManager;
 import me.matl114.hacks.modules.mine.QueueMine;
+import me.matl114.hacks.modules.task.DisablerManager;
 import me.matl114.hacks.utils.HotKeyUtils;
 import me.matl114.hacks.utils.config.EntrySet;
 import me.matl114.hacks.utils.config.NBTTypes;
@@ -66,7 +66,6 @@ import net.minecraft.block.Blocks;
 import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.client.gui.screen.ingame.GenericContainerScreen;
-import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.component.ComponentType;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.ContainerComponent;
@@ -125,6 +124,9 @@ public class KitReplenish extends BaseModule {
 
     public final FlagRef zeroTickSupplyShulker =
             flagBuilder(replenishRoot.add("zero-tick-supply")).build();
+
+    public final FlagRef longRequest =
+            flagBuilder(replenishRoot.add("long-request")).build();
 
     public final FlagRef log =
             builder(replenishRoot.add("log"), Boolean.class).defaultValue(true).build();
@@ -185,15 +187,11 @@ public class KitReplenish extends BaseModule {
         transaction = null;
     }
 
-    public void onSwitchWorld(Event<ClientPlayerEntity> event) {
-        clearReplenishingTask();
-        enderChestRequest = false;
-        shulkerBoxRequest = null;
-    }
+    public void onSwitchWorld() {}
 
     int timerPostResortInventory = 0;
 
-    public void onPreInputEvent(Event<Void> event) {
+    public void onPreInputEvent() {
         if (checkNull()) return;
         if (transaction != null) {
             process:
@@ -238,6 +236,10 @@ public class KitReplenish extends BaseModule {
                             enderChestRequest = true;
                             break process;
                         } else {
+
+                            if (longRequest.get()) {
+                                break process;
+                            }
                             transaction.complete(false);
                             break process;
                         }
@@ -294,6 +296,10 @@ public class KitReplenish extends BaseModule {
                                 break process;
                             }
                         } else {
+                            if (longRequest.get()) {
+                                transaction.stage = Transaction.STAGE_FIND_SHULKER;
+                                break process;
+                            }
                             transaction.complete(false);
                             break process;
                         }
@@ -1151,9 +1157,15 @@ public class KitReplenish extends BaseModule {
         ScreenHandler handler = mc.player.currentScreenHandler;
         from = Math.clamp(from, 0, Math.min(inventory.size(), InventoryUtils.getPlayerBackpackSize()));
         to = Math.clamp(to, from, Math.min(inventory.size(), InventoryUtils.getPlayerBackpackSize()));
-        Set<ReplenishTemplate> templates = InventoryUtils.streamInventory(trans.viewInventory)
-                .map(ReplenishTemplate::new)
-                .collect(Collectors.toSet());
+        Map<ReplenishTemplate, Integer> templates = new LinkedHashMap<>();
+        InventoryUtils.streamInventory(trans.viewInventory)
+                .forEach(s -> templates.merge(new ReplenishTemplate(s), s.getCount(), Integer::sum));
+        InventoryUtils.streamInventory(playerInventory).forEach(s -> {
+            var template = new ReplenishTemplate(s);
+            if (templates.containsKey(template)) {
+                templates.merge(template, -s.getCount(), Integer::sum);
+            }
+        });
         for (var i = from; i < to; ++i) {
             if (i == trans.leftEmptySlotForShulker) {
                 continue;
@@ -1163,9 +1175,12 @@ public class KitReplenish extends BaseModule {
                 continue;
             }
             ItemStack currentStack = playerInventory.getStack(i);
-            if (dropBlackListedItem.get().test(currentStack.getItem())) continue;
             ReplenishTemplate template = new ReplenishTemplate(currentStack);
-            if (templates.contains(template)) continue;
+            Integer currentCount = templates.get(template);
+            if (currentCount != null) {
+                templates.put(template, currentCount - currentStack.getCount());
+            }
+            if (dropBlackListedItem.get().test(currentStack.getItem())) continue;
             ;
             ItemStack templateStack = inventory.getStack(i);
             if (isShulker(templateStack)) {
@@ -1173,7 +1188,9 @@ public class KitReplenish extends BaseModule {
             }
 
             if (!template.match(templateStack)) {
-                drop(handler, targetSlot);
+                if (currentCount == null || (trans.rule.dropOverAmounts() && currentCount < 0)) {
+                    drop(handler, targetSlot);
+                }
             }
         }
     }
@@ -1355,7 +1372,7 @@ public class KitReplenish extends BaseModule {
     }
 
     private void onEditCommand(CommandExecution sender) {
-        Tasks.scheduleDelayed(this::openKitEditScreen, 1);
+        Tasks.scheduleDelayed(() -> openKitEditScreen(CONFIG_FACTORY), 1);
         sender.sendMessage("&a正在打开Kit编辑界面");
     }
 
@@ -1493,7 +1510,7 @@ public class KitReplenish extends BaseModule {
 
         public void setInventory(@Nonnull Inventory inventory, String name) {
             this.name = name;
-            this.rule = new Rule(Type.GREEDY, 0, inventory.size(), false, false, false, true, false);
+            this.rule = new Rule(Type.GREEDY, 0, inventory.size(), false, false, false, true, false, false);
             this.inventory = inventory;
             createSummary();
         }
@@ -1517,15 +1534,18 @@ public class KitReplenish extends BaseModule {
 
     public void replenishCurrentKit() {
         if (checkNull()) return;
-        if (this.transaction != null) {
-            if (!this.transaction.isCompleted()) {
-                logI18N("message.kit-manager.kit-replenish.request.blocked");
-            }
+        Transaction trans = this.transaction;
+        if (trans != null && !trans.isCompleted()) {
+            logI18N("message.kit-manager.kit-replenish.request.blocked");
         }
         clearReplenishingTask();
         shulkerBoxRequest = null;
         enderChestRequest = false;
         timeoutEnderChest = -1;
+        if (trans != null) {
+            return;
+        }
+
         Kit kit = this.requestKit != null ? this.requestKit : this.kitMap.getDefaultKit();
         if (kit != null) {
             logI18N("message.kit-manager.kit-replenish.request.success", kit.name());
@@ -1699,19 +1719,24 @@ public class KitReplenish extends BaseModule {
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
         SubScreenWidget kitEditEntry = new SubScreenWidget(0, dblank, dx, dy);
-        kitEditEntry.addDrawableChild(createLabel("widget.kit-manager.kit-save-map", 0, 0, indexWidth, dy));
-        kitEditEntry.addDrawableChild(createExecuteButton(
+        kitEditEntry.addDrawableChild(factory.createLabel("widget.kit-manager.kit-save-map", 0, 0, indexWidth, dy));
+        kitEditEntry.addDrawableChild(factory.createExecuteButton(
                 "widget.kit-manager.open-kit-list",
-                ButtonAction.run(this::openKitEditScreen),
+                ButtonAction.run(() -> openKitEditScreen(factory)),
                 indexWidth + blankWidth,
                 0,
                 dx - indexWidth - blankWidth,
                 dy));
         acceptor.accept(kitEditEntry);
-        acceptor.accept(createExecuteButton(
+        acceptor.accept(factory.createExecuteButton(
                 () -> {
                     Kit kit = kitMap.getDefaultKit();
                     if (kit != null) {
@@ -1724,17 +1749,17 @@ public class KitReplenish extends BaseModule {
                     }
                 },
                 List::of,
-                ButtonAction.run(this::openKitEditScreen),
+                ButtonAction.run(() -> openKitEditScreen(factory)),
                 0,
                 dblank,
                 dx,
                 dy));
-        acceptor.accept(createTitle("widget.kit-manager.command", 0, dblank, dx, dy));
-        acceptor.accept(createTitle("widget.interact.interact-all.use-argument", 0, dblank, dx, dy));
-        acceptor.accept(createTitle("widget.queue-mine.mine.use-argument", 0, dblank, dx, dy));
+        acceptor.accept(factory.createTitle("widget.kit-manager.command", 0, dblank, dx, dy));
+        acceptor.accept(factory.createTitle("widget.interact.interact-all.use-argument", 0, dblank, dx, dy));
+        acceptor.accept(factory.createTitle("widget.queue-mine.mine.use-argument", 0, dblank, dx, dy));
     }
 
-    public void openKitEditScreen() {
+    public void openKitEditScreen(ElementFactory factory) {
         List<MutableRecord> records = kitMap.kitList().stream()
                 .map(s -> MutableRecord.of(Kit.KEYS, s))
                 .collect(Collectors.toCollection(ArrayList::new));
@@ -1744,7 +1769,7 @@ public class KitReplenish extends BaseModule {
         ListEntryWidgetController mutableList = ListEntryWidgetController.mutable(
                 records,
                 () -> MutableRecord.of(Kit.KEYS, Kit.EMPTY),
-                (v) -> createEditWidget(indexOf, records, v),
+                (v) -> createEditWidget(indexOf, records, v, factory),
                 45,
                 250);
         ConfirmingWidgetScreen confirmScreen = new ConfirmingWidgetScreen(
@@ -1761,7 +1786,10 @@ public class KitReplenish extends BaseModule {
     }
 
     private SubScreenWidget createEditWidget(
-            MutableObject<MutableRecord> indexOf, List<MutableRecord> mutableList, MutableRecord record) {
+            MutableObject<MutableRecord> indexOf,
+            List<MutableRecord> mutableList,
+            MutableRecord record,
+            ElementFactory factory) {
         SubScreenWidget widget = new SubScreenWidget(0, 0, 250, 45);
         widget.addDrawableChild(createToggleButton(
                 Text::empty,
@@ -1789,14 +1817,14 @@ public class KitReplenish extends BaseModule {
             return true;
         });
         name.addListener(s -> record.set(nameKey, s));
-        widget.addDrawableChild(name.generateKeyValueInput(30, 1, 30, 0, 60, 20));
+        widget.addDrawableChild(name.generateKeyValueInput(factory, 30, 1, 30, 0, 60, 20));
         String maxSizeKey = Kit.KEYS.get(2);
         AttrKeyValue<Integer> maxSize =
                 AttrKeyValue.integer("widget.kit-manager.open-kit-list.max-size", record.getOrPut(maxSizeKey, 0));
         maxSize.addValidator(Configs.INT_NONNEGATIVE);
         maxSize.addListener(s -> record.set(maxSizeKey, s));
 
-        widget.addDrawableChild(maxSize.generateKeyValueInput(120, 1, 30, 0, 20, 20));
+        widget.addDrawableChild(maxSize.generateKeyValueInput(factory, 120, 1, 30, 0, 20, 20));
         String ruleKey = Kit.KEYS.get(3);
         widget.addDrawableChild(createLabel(
                 () -> {
@@ -1811,10 +1839,10 @@ public class KitReplenish extends BaseModule {
                                     : Text.translatable("widget.kit-manager.open-kit-list.rule.dump.false"));
                 },
                 List::of,
-                30 + 1,
-                23 + 1,
-                150 - 2,
-                20 - 2));
+                30,
+                23,
+                150,
+                20));
         widget.addDrawableChild(createExecuteButton(
                 "widget.kit-manager.open-kit-list.rule.edit",
                 ButtonAction.run(() -> {
@@ -1826,7 +1854,7 @@ public class KitReplenish extends BaseModule {
                             mut,
                             (id) -> "widget.kit-manager.open-kit-list.rule." + id,
                             WidgetUtils.DEFAULT_CONFIG_SCREEN_LAYOUT,
-                            WidgetUtils.DEFAULT_PALETTE);
+                            factory);
                     var screen = new CenterScreen(wd);
                     screen.access().addCloseFuture(() -> {
                         Rule rule2 = mut.toRecord(Rule.class);
@@ -1834,10 +1862,10 @@ public class KitReplenish extends BaseModule {
                     });
                     screen.access().openFromCurrent();
                 }),
-                180 + 1,
-                23 + 1,
-                70 - 2,
-                20 - 2));
+                180,
+                23,
+                70,
+                20));
         //        AttrKeyValue<Type> rulesType =
         //                AttrKeyValue.enumMap("widget.kit-manager.open-kit-list.rule.type", currentRule.type(),
         // Type.class);
@@ -1877,10 +1905,10 @@ public class KitReplenish extends BaseModule {
                         Kit temporaryKit = record.toRecord(Kit.class);
                         openViewScreen.apply(temporaryKit).run();
                     }),
-                    170 + 1,
-                    1 + 1,
-                    40 - 2,
-                    20 - 2));
+                    170,
+                    1,
+                    40,
+                    20));
             widget.addDrawableChild(createExecuteButton(
                     "widget.kit-manager.open-kit-list.items.import",
                     ButtonAction.run(() -> {
@@ -1893,13 +1921,12 @@ public class KitReplenish extends BaseModule {
                             openViewScreen.apply(saveKit).run();
                         }
                     }),
-                    210 + 1,
-                    1 + 1,
-                    40 - 2,
-                    20 - 2));
+                    210,
+                    1,
+                    40,
+                    20));
         } else {
-            widget.addDrawableChild(
-                    createLabel("widget.kit-manager.open-kit-list.items.error", 180 + 1, 1 + 1, 70 - 2, 20 - 2));
+            widget.addDrawableChild(createLabel("widget.kit-manager.open-kit-list.items.error", 180, 1, 70, 20));
         }
         return widget;
     }
@@ -2024,9 +2051,18 @@ public class KitReplenish extends BaseModule {
             boolean autoClose,
             boolean postMine,
             boolean postReorder,
-            boolean postDrop) {
-        private static final List<String> KEYS =
-                List.of("type", "from", "to", "dump", "auto-close", "post-mine", "post-reorder", "post-drop");
+            boolean postDrop,
+            boolean dropOverAmounts) {
+        private static final List<String> KEYS = List.of(
+                "type",
+                "from",
+                "to",
+                "dump",
+                "auto-close",
+                "post-mine",
+                "post-reorder",
+                "post-drop",
+                "drop-over-amount-items");
         public static Rule DEFAULT = new Rule();
         static final MapCodec<Rule> MAP_CODEC = RecordCodecBuilder.mapCodec(oinstance -> oinstance
                 .group(
@@ -2039,11 +2075,14 @@ public class KitReplenish extends BaseModule {
                         Codec.BOOL.optionalFieldOf("auto-close", false).forGetter(Rule::autoClose),
                         Codec.BOOL.optionalFieldOf("post-mine", false).forGetter(Rule::postMine),
                         Codec.BOOL.optionalFieldOf("post-reorder", true).forGetter(Rule::postReorder),
-                        Codec.BOOL.optionalFieldOf("post-drop", false).forGetter(Rule::postDrop))
+                        Codec.BOOL.optionalFieldOf("post-drop", false).forGetter(Rule::postDrop),
+                        Codec.BOOL
+                                .optionalFieldOf("drop-over-amount-items", false)
+                                .forGetter(Rule::dropOverAmounts))
                 .apply(oinstance, Rule::new));
 
         public Rule() {
-            this(Type.GREEDY, 0, 36, false, false, false, true, false);
+            this(Type.GREEDY, 0, 36, false, false, false, true, false, false);
         }
     }
 

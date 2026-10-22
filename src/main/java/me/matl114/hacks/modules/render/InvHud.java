@@ -16,7 +16,6 @@ import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.inventory.ItemStackSample;
 import me.matl114.versioned.api.VDrawContext;
-import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
@@ -48,8 +47,10 @@ public class InvHud extends BaseModule {
             .defaultValue(new RegistryRegex<>(new Regex("^(.*)$"), Registries.ITEM))
             .build();
 
-    public IntRef line =
-            intBuilder(invHud.add("count-per-line")).defaultValue(9).build();
+    public IntRef line = intBuilder(invHud.add("count-per-line"))
+            .defaultValue(9)
+            .validator(Configs.INT_POSITIVE)
+            .build();
 
     public FlagRef showShulkerItems = builder(invHud.add("show-shulker-items"), Boolean.class)
             .defaultValue(true)
@@ -64,7 +65,7 @@ public class InvHud extends BaseModule {
 
     List<ItemStack> toShow;
 
-    public void onPostTick(Event<ClientPlayerEntity> event) {
+    public void onPostTick() {
         if (enable.get()) {
             toShow = new ArrayList<>();
             Map<ItemStackSample, Integer> map;
@@ -104,7 +105,7 @@ public class InvHud extends BaseModule {
         int startX = right.get() ? (-18 * x - 18) : (18 * x);
         int startY = down.get() ? (-18 * totalLine + 18 * y) : (18 * y);
         vdraw.drawItem(stack, startX + 1, startY + 1, 999, 0);
-        vdraw.drawItemInSlot(mc.textRenderer, stack, startX + 1, startY + 1, null);
+        vdraw.drawItemInSlot(vdraw.getTextDrawer(), stack, startX + 1, startY + 1, null);
     }
 
     public void onRender2D(Event<Render2D> event) {

@@ -4,14 +4,13 @@ import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
-import lombok.val;
 import me.matl114.SlimefunHelper;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.PacketManager;
 import me.matl114.events.impl.SlotClickAction;
 import me.matl114.events.packets.PacketStorage;
-import me.matl114.events.packets.PacketStorageImpl;
+import me.matl114.events.packets.PacketStorageSendImpl;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.managers.Configs;
@@ -20,6 +19,7 @@ import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.config.StringRef;
 import me.matl114.managers.input.MultiKeyBind;
+import me.matl114.utils.ChatUtils;
 import me.matl114.utils.Debug;
 import me.matl114.utils.entity.PlayerInputUtils;
 import net.minecraft.network.packet.Packet;
@@ -207,6 +207,14 @@ public class PacketDebugger extends BaseModule {
                     debug("Send", simplifyId(type.getPacketId().id()), ", Id:", confirm.getTeleportId(), timeStr);
                 } else if (type instanceof CommonPongC2SPacket pong) {
                     debug("Send", simplifyId(type.getPacketId().id()), ", Id:", pong.getParameter(), timeStr);
+                } else if (type instanceof PlayerInteractBlockC2SPacket packet) {
+                    debug(
+                            "Send",
+                            simplifyId(type.getPacketId().id()),
+                            ", Pos:",
+                            ChatUtils.getDisplayedLocation(
+                                    Vec3d.of(packet.getBlockHitResult().getBlockPos())),
+                            timeStr);
                 } else {
                     debug("Send", simplifyId(type.getPacketId().id()), timeStr);
                 }
@@ -238,8 +246,8 @@ public class PacketDebugger extends BaseModule {
         }
     }
 
-    public void onViaSend(Event<PacketStorage> eventPacketStorage) {
-        if (!(eventPacketStorage.context instanceof PacketStorageImpl) && enable.get() && debugViaPackets.get()) {
+    public void onViaSend(Event<PacketStorage.Send> eventPacketStorage) {
+        if (!(eventPacketStorage.context instanceof PacketStorageSendImpl) && enable.get() && debugViaPackets.get()) {
             // via packets
             PacketType<?> type = eventPacketStorage.context.packetType();
             if (type != null && typesDebug.contains(type)) {

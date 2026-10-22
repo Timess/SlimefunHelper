@@ -27,7 +27,6 @@ import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.registry.Registries;
 import net.minecraft.text.TextColor;
@@ -72,6 +71,7 @@ public class WorldScanner extends BaseModule {
 
     public IntRef distanceChunk = builder(worldScanner.add("search-radius"), IntRef.TYPE)
             .defaultValue(12)
+            .validator(Configs.intRange(0, 36))
             .build();
 
     public NBTRef<TracingOption> option = builder(worldScanner.add("esp-option"), TracingOption.class)
@@ -109,7 +109,7 @@ public class WorldScanner extends BaseModule {
         super.onDisableModule();
     }
 
-    public void onResetWorldScanner(Event<Void> event) {
+    public void onResetWorldScanner() {
         currentSearchingResult.clear();
     }
 
@@ -193,7 +193,7 @@ public class WorldScanner extends BaseModule {
     int lastLogTick = 0;
     final int MAX_RENDER_BLOCKS = 10_000;
 
-    public void onTick(Event<ClientPlayerEntity> event) {
+    public void onTick() {
         if (!checkNull()
                 && pendingRefreshWhenInGame
                 && (mc.currentScreen == null || mc.currentScreen instanceof HandledScreen<?>)) {
@@ -271,9 +271,9 @@ public class WorldScanner extends BaseModule {
             MatrixStack stack = event.context().stack();
             RenderUtils.startDrawVirtual(stack);
             try {
-                boxSolidCollector.render3D(stack);
-                boxOutlineCollector.render3D(stack);
-                traceLineCollector.render3D(stack);
+                boxSolidCollector.render3D(stack, event.context().partialTicks());
+                boxOutlineCollector.render3D(stack, event.context().partialTicks());
+                traceLineCollector.render3D(stack, event.context().partialTicks());
             } finally {
                 RenderUtils.stopDrawVirtual(stack);
             }

@@ -16,7 +16,6 @@ import me.matl114.hacks.api.ModuleManager;
 import me.matl114.hacks.modules.HackModules;
 import me.matl114.hacks.modules.move.PlayerStateManager;
 import me.matl114.hacks.modules.render.*;
-import me.matl114.hacks.modules.render.StorageDisplay;
 import me.matl114.managers.Tasks;
 import me.matl114.utils.*;
 import net.minecraft.client.MinecraftClient;
@@ -487,7 +486,7 @@ public class RenderTasks {
     private static NoRender noRender;
 
     @Getter
-    private static NoSound noSound;
+    private static HandView handView;
 
     @Getter
     private static EntityLog entityLog;
@@ -518,12 +517,6 @@ public class RenderTasks {
 
     @Getter
     private static MineESP mineESP;
-
-    @Getter
-    private static PlayerLog playerLog;
-
-    @Getter
-    private static PlayerQueue playerQueue;
 
     @Getter
     private static ProjectileESP projectileESP;
@@ -559,15 +552,15 @@ public class RenderTasks {
     private static EquipmentHud equipmentHud;
 
     @Getter
-    private static StorageDisplay storageDisplay;
+    private static ItemDisplay itemDisplay;
 
     @Getter
-    private static EnchantmentDisplay enchantmentDisplay;
+    private static ShulkerDisplay shulkerDisplay;
 
     private static void initModules(ModuleManager m) {
         renderExtra = new RenderExtra().register(m);
         noRender = new NoRender().register(m);
-        noSound = new NoSound().register(m);
+        handView = new HandView().register(m);
         entityLog = new EntityLog().register(m);
         entityESP = new EntityESP().register(m);
         explosiveESP = new ExplosiveESP().register(m);
@@ -579,8 +572,7 @@ public class RenderTasks {
         itemList = new ItemList().register(m);
         worldScanner = new WorldScanner().register(m);
         mineESP = new MineESP().register(m);
-        playerLog = new PlayerLog().register(m);
-        playerQueue = new PlayerQueue().register(m);
+
         projectileESP = new ProjectileESP().register(m);
         zoom = new Zoom().register(m);
         sleepMode = new SleepMode().register(m);
@@ -592,8 +584,8 @@ public class RenderTasks {
         invHud = new InvHud().register(m);
         playerStatistic = new PlayerStatistic().register(m);
         equipmentHud = new EquipmentHud().register(m);
-        storageDisplay = new StorageDisplay().register(m);
-        enchantmentDisplay = new EnchantmentDisplay().register(m);
+        itemDisplay = new ItemDisplay().register(m);
+        shulkerDisplay = new ShulkerDisplay().register(m);
     }
 
     static {

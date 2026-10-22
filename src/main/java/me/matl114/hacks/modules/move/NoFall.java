@@ -12,6 +12,7 @@ import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
 import me.matl114.hacks.api.ModulePreset;
+import me.matl114.hacks.modules.task.MovementManager;
 import me.matl114.hacks.utils.config.Regex;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
 import me.matl114.hooks.ViaFabricPlusHooks;
@@ -28,6 +29,7 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.attribute.EntityAttributes;
+import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.MaceItem;
 import net.minecraft.network.packet.Packet;
@@ -40,18 +42,12 @@ import org.jetbrains.annotations.ApiStatus;
 
 public class NoFall extends BaseModule implements LegalMovementManager.MovementModifier {
 
-    public static LegalMovementManager.DelegateMovementModifier instance;
     public final ModulePath moveSafety = makePath(Configs.MOV_CONFIG, "move-safety");
     public final ModulePath noFallPath = moveSafety.add("no-fall");
 
     public NoFall() {
         super("NoFall");
-        if (instance == null) {
-            instance = new LegalMovementManager.DelegateMovementModifier(this::cast);
-            // register at here for the first time
-            MovTasks.PLAYER_PIPELINE_0.addMovementModifierFactory(() -> instance);
-        }
-        instance.setDelegate(this::cast);
+        MovementManager.registerMovementPipeline(this);
         bindFlag(noFall);
     }
 
@@ -132,10 +128,10 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
                 Listener.getEntityClientVelocityUpdate().getChannel(EntityType.PLAYER), this::onPlayerTickVelocity);
         registerListener(Listener.getPacketPoint().getChannel(PlayerMoveC2SPacket.class), this::onPlayerMovePacketSend);
         registerListener(Listener.getPlayerNotFlyJumpPoint(), this::onPlayerJump);
-        registerListener(Listener.getPlayerWebSlowPoint(), this::onWeb);
+        registerListener(Listener.getPlayerSlowedByBlockPoint(), this::onSlowDown);
     }
 
-    public void onPlayerInit(Event<ClientPlayerEntity> player) {
+    public void onPlayerInit() {
         initArguments();
         initDelegate();
     }
@@ -204,7 +200,7 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
         return false;
     }
 
-    public void onWeb(Event<Vec3d> vec3d) {
+    public void onSlowDown() {
         lastOnGroundHeight = mc.player.getY();
         if (runningDelegate != null) runningDelegate.counter = 0;
     }
@@ -239,8 +235,13 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
         if (args.isOnGround()
                 || args.isTouchingWater()
                 || args.getBlockStateAtPos().isOf(Blocks.BUBBLE_COLUMN)
+                || args.hasVehicle()
                 || PlayerStateManager.INSTANCE.lastInWeb
-                || PlayerStateManager.INSTANCE.lastInWater) {
+                || PlayerStateManager.INSTANCE.lastSlowByBlock
+                || PlayerStateManager.INSTANCE.lastInWater
+                || PlayerStateManager.INSTANCE.lastClimbing
+                || mc.player.hasStatusEffect(StatusEffects.SLOW_FALLING)
+                || mc.player.hasStatusEffect(StatusEffects.LEVITATION)) {
             lastOnGroundHeight = lastHeight;
             runningDelegate.counter = 0;
         }
@@ -269,6 +270,12 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
 
     public void applyBeforeMovementPacketModify(Event<LegalMovementManager> movementManagerEvent) {
         if (entityStage == ENTITY_STAGE_ALIVE) {
+            ClientPlayerEntity args = movementManagerEvent.context.playerStatus.entity;
+            // when falling into water, reset onGroundHeight
+            if (args.isTouchingWater() || args.getBlockStateAtPos().isOf(Blocks.BUBBLE_COLUMN) || args.hasVehicle()) {
+                lastOnGroundHeight = lastHeight = args.getY();
+                runningDelegate.counter = 0;
+            }
             runningDelegate.applyBeforeMovementPacketModify(movementManagerEvent);
         }
     }
@@ -1950,6 +1957,7 @@ public class NoFall extends BaseModule implements LegalMovementManager.MovementM
     }
 
     public void onPresetLoad(Event<EventContainer<ModulePreset>> presetEvent) {
+        if (presetEvent.context().getValue().isOptionPreset()) return;
         var modulePreset = presetEvent.context().getValue();
         switch (modulePreset) {
             case AC_GRIM, AC_GRIM_LEGACY -> {

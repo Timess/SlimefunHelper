@@ -46,8 +46,10 @@ public class EventNotify extends BaseModule {
 
     public final FlagRef onlyMin = flagBuilder(path.add("min-only")).build();
 
-    public final DoubleRef minScreenWidth =
-            doubleBuilder(path.add("min-width")).defaultValue(0.0D).build();
+    public final DoubleRef minScreenWidth = doubleBuilder(path.add("min-width"))
+            .defaultValue(0.0D)
+            .validator(Configs.doubleRange(0.0D, Double.MAX_VALUE))
+            .build();
 
     public final FlagRef enableQueue = flagBuilder(path.add("enable-queue")).build();
 
@@ -131,7 +133,7 @@ public class EventNotify extends BaseModule {
         }
     }
 
-    public void onLeaveServer(Event<Void> eventLeave) {
+    public void onLeaveServer() {
         if (enable.get() && leave.get()) {
             if (checkMin()) {
                 return;
@@ -167,9 +169,14 @@ public class EventNotify extends BaseModule {
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
-        acceptor.accept(createExecuteButton(
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
+        acceptor.accept(factory.createExecuteButton(
                 "widget.event-notify.test-usage",
                 ButtonAction.run(() -> {
                     notify("[SlimefunHelper]测试", "HelloWorld");

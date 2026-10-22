@@ -6,7 +6,6 @@ import me.matl114.accessors.access.ClientPlayerAccess;
 import me.matl114.accessors.hacks.PlayerInteractionAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
-import me.matl114.events.impl.EventContainer;
 import me.matl114.hacks.InvTasks;
 import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
@@ -22,7 +21,6 @@ import me.matl114.managers.Configs;
 import me.matl114.managers.config.*;
 import me.matl114.managers.input.MultiKeyBind;
 import me.matl114.utils.InventoryUtils;
-import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.EntityStatuses;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
@@ -55,6 +53,7 @@ public class AutoTotem extends BaseModule {
 
     public final IntRef cooldown = builder(totem.add("totem-swap-cooldown"), IntRef.TYPE)
             .defaultValue(1)
+            .validator(Configs.INT_NONNEGATIVE)
             .build();
 
     public final NBTRef<OptionalPrimitive<Integer>> forcedHotbarSlot = builder(
@@ -92,7 +91,7 @@ public class AutoTotem extends BaseModule {
 
     StateExecutor noTotem = new StateExecutor();
     // todo: add legal mode (swap hand)
-    public void onTick(Event<ClientPlayerEntity> ev) {
+    public void onTick() {
         if (enable.get()) {
             onTotemLazy();
         }
@@ -302,10 +301,10 @@ public class AutoTotem extends BaseModule {
         }
     }
 
-    public void onPlayerInit(Event<ClientPlayerEntity> eventPlayer) {
+    public void onPlayerInit() {
         noTotem.state(false);
         forcedHotbarPreviousSlot = -1;
     }
 
-    public void onModulePreset(Event<EventContainer<ModulePreset>> event) {}
+    public void onModulePreset() {}
 }

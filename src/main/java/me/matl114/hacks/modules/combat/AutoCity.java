@@ -6,10 +6,12 @@ import me.matl114.accessors.hacks.PlayerInteractionAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.events.impl.BlockBreak;
+import me.matl114.events.impl.EventContainer;
 import me.matl114.hacks.CombatTasks;
 import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.api.ModulePreset;
 import me.matl114.hacks.modules.interact.AutoSurround;
 import me.matl114.hacks.modules.interact.InteractExtra;
 import me.matl114.hacks.modules.interact.SelfTrap;
@@ -72,6 +74,12 @@ public class AutoCity extends BaseModule {
         // add prio so that it works before place modules and crystal modules
         registerListener(Listener.getPreHandleInputEvents(), this::onInputEvent, -33550336);
         registerListener(PacketMine.getPacketMineAction().getChannel(BlockBreak.Stage.PRE), this::onPrePacketMine);
+        registerListener(Listener.getCustomListener().getChannel(ModulePreset.class), this::onModulePreset);
+    }
+
+    public void onModulePreset(Event<EventContainer<ModulePreset>> event) {
+        ModulePreset preset = event.context.getValue();
+        if (preset.isMultitaskPreset()) eatingAbort.set(preset.getEatingAbort(eatingAbort.get()));
     }
 
     PlayerEntity targetEntity;
@@ -94,7 +102,7 @@ public class AutoCity extends BaseModule {
         }
     }
 
-    public void onInputEvent(Event<Void> event) {
+    public void onInputEvent() {
         if (enable.get()) {
             pendingSwitchPos = false;
             refreshTarget();
@@ -130,6 +138,7 @@ public class AutoCity extends BaseModule {
                 .toList());
 
         Comparator<BlockPos> blockPosComparator = Comparator.comparingInt(BlockPos::getY)
+                .thenComparing(Comparator.comparingInt(this::countAirNeighbors).reversed())
                 .thenComparingDouble(v -> v.getSquaredDistance(targetEntityPos))
                 .thenComparingDouble(v -> MathUtils.getBlockBox(v).squaredMagnitude(pos));
 
@@ -279,5 +288,15 @@ public class AutoCity extends BaseModule {
         if (working) {
             PacketMine.INSTANCE.tickMine();
         }
+    }
+
+    private int countAirNeighbors(BlockPos pos) {
+        int count = 0;
+        for (Direction direction : Direction.values()) {
+            if (mc.world.getBlockState(pos.offset(direction)).isAir()) {
+                count++;
+            }
+        }
+        return count;
     }
 }

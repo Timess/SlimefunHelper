@@ -34,7 +34,6 @@ import me.matl114.utils.CommonUtils;
 import me.matl114.utils.MathUtils;
 import me.matl114.utils.ScreenUtils;
 import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
@@ -194,7 +193,7 @@ public class XaeroHelper extends BaseModule {
         }
     }
 
-    public void onTickMapRender(Event<ClientPlayerEntity> event) {
+    public void onTickMapRender() {
         if (loadedChunkRender.get() && loadedChunkFeature != null) {
             Set<ChunkPos> chunkPoses = new HashSet<>(100);
             for (var chunk : CommonUtils.chunks(false)) {
@@ -412,7 +411,7 @@ public class XaeroHelper extends BaseModule {
         }
     }
 
-    public void onXaeroTempWaypointSync(Event<ClientPlayerEntity> eventVoid) {
+    public void onXaeroTempWaypointSync() {
         if (checkNull()) return;
         cleanupCollectedWaypoints();
         if (!XaeroHooks.getInstance().isXaeroMiniMapEnable()) {
@@ -465,9 +464,14 @@ public class XaeroHelper extends BaseModule {
     }
 
     @Override
-    public void addCustomWidgets(Consumer<DrawableWidget> acceptor, int dx, int dy, int dblank) {
-        super.addCustomWidgets(acceptor, dx, dy, dblank);
-        acceptor.accept(createTitle(
+    public void addCustomWidgets(
+            Consumer<DrawableWidget> acceptor,
+            int dx,
+            int dy,
+            int dblank,
+            me.matl114.gui.interfaces.ElementFactory factory) {
+        super.addCustomWidgets(acceptor, dx, dy, dblank, factory);
+        acceptor.accept(factory.createTitle(
                 XaeroHooks.getInstance().isXaeroWorldMapEnable()
                         ? "widget.xaero-helper.xaero-worldmap-enable"
                         : "widget.xaero-helper.xaero-worldmap-not-support",
@@ -475,7 +479,7 @@ public class XaeroHelper extends BaseModule {
                 dblank,
                 dx,
                 dy));
-        acceptor.accept(createTitle(
+        acceptor.accept(factory.createTitle(
                 XaeroHooks.getInstance().isXaeroMiniMapEnable()
                         ? "widget.xaero-helper.xaero-minimap-enable"
                         : "widget.xaero-helper.xaero-minimap-not-support",
@@ -483,7 +487,7 @@ public class XaeroHelper extends BaseModule {
                 dblank,
                 dx,
                 dy));
-        acceptor.accept(createTitle(
+        acceptor.accept(factory.createTitle(
                 XaeroHooks.getInstance().isXaeroPlusEnable()
                         ? "widget.xaero-helper.xaero-plus-enable"
                         : "widget.xaero-helper.xaero-plus-not-support",

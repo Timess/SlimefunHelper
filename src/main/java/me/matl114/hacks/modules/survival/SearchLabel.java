@@ -28,7 +28,6 @@ import me.matl114.versioned.api.VDataFlag;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
-import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.ItemEntity;
@@ -70,8 +69,10 @@ public class SearchLabel extends BaseModule {
             .defaultValue(new EntrySet<>(Registries.BLOCK, List.of(Blocks.CHEST, Blocks.SHULKER_BOX)))
             .build();
 
-    public final IntRef importantBlocksCount =
-            intBuilder(searchControl.add("block-counts")).defaultValue(8).build();
+    public final IntRef importantBlocksCount = intBuilder(searchControl.add("block-counts"))
+            .defaultValue(8)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
     public final NBTRef<EntrySet<Block>> instantBlocks = builder(
                     searchControl.add("instant-blocks"), EntrySet.<Block>parameter())
@@ -87,8 +88,10 @@ public class SearchLabel extends BaseModule {
             .defaultValue(new EntrySet<>(Registries.ITEM, List.of(Items.ELYTRA, Items.FILLED_MAP, Items.SHULKER_BOX)))
             .build();
 
-    public final IntRef importantItemsCount =
-            intBuilder(searchControl.add("item-counts")).defaultValue(1).build();
+    public final IntRef importantItemsCount = intBuilder(searchControl.add("item-counts"))
+            .defaultValue(1)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
     public final FlagRef labelImportantEntities =
             flagBuilder(searchControl.add("enable-important-entities")).build();
@@ -100,8 +103,10 @@ public class SearchLabel extends BaseModule {
                     List.of(EntityType.PLAYER, EntityType.CHEST_MINECART, EntityType.HOPPER_MINECART)))
             .build();
 
-    public final IntRef importantEntitiesCount =
-            intBuilder(searchControl.add("entity-counts")).defaultValue(4).build();
+    public final IntRef importantEntitiesCount = intBuilder(searchControl.add("entity-counts"))
+            .defaultValue(4)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
     public final NBTRef<EntrySet<EntityType<?>>> instantEntities = builder(
                     searchControl.add("instant-entities"), EntrySet.<EntityType<?>>parameter())
@@ -306,7 +311,7 @@ public class SearchLabel extends BaseModule {
         loadedWorld = null;
     }
 
-    private void onWorldSwitch(Event<World> event) {
+    private void onWorldSwitch() {
         lastChunkPos = null;
         loadedWorld = null;
         if (enable.get() && labelInWorldMap.get()) {
@@ -314,7 +319,7 @@ public class SearchLabel extends BaseModule {
         }
     }
 
-    public void onPostTick(Event<ClientPlayerEntity> eventUpdate) {
+    public void onPostTick() {
         if (enable.get() && labelInWorldMap.get() && !Objects.equals(loadedWorld, mc.world.getRegistryKey())) {
             loadCurrentData();
         }

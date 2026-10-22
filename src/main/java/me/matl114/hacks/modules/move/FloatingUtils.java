@@ -1,10 +1,11 @@
 package me.matl114.hacks.modules.move;
 
+import java.util.Optional;
 import me.matl114.events.Event;
-import me.matl114.hacks.MovTasks;
+import me.matl114.events.Listener;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
-import me.matl114.hacks.utils.EntityUtils;
+import me.matl114.hacks.modules.task.MovementManager;
 import me.matl114.hacks.utils.config.NBTTypes;
 import me.matl114.hacks.utils.config.OptionalPrimitive;
 import me.matl114.hacks.utils.entity.LegalMovementManager;
@@ -29,11 +30,7 @@ public class FloatingUtils extends BaseModule implements LegalMovementManager.Mo
 
     public FloatingUtils() {
         super("FloatingUtils");
-        if (instance == null) {
-            instance = new LegalMovementManager.DelegateMovementModifier(this::cast);
-            MovTasks.PLAYER_PIPELINE_0.addMovementModifierFactory(() -> instance);
-        }
-        instance.setDelegate(this::cast);
+        MovementManager.registerMovementPipeline(this);
         INSTANCE = this;
     }
 
@@ -93,6 +90,7 @@ public class FloatingUtils extends BaseModule implements LegalMovementManager.Mo
     @Override
     public void registerAll() {
         super.registerAll();
+        registerListener(Listener.getPreGameTick(), this::onPreGameTick);
     }
 
     @Override
@@ -111,17 +109,16 @@ public class FloatingUtils extends BaseModule implements LegalMovementManager.Mo
                 || forceFloatingThisTick;
     }
 
-    @Override
-    public void applyPreTickModify(Event<LegalMovementManager> movementManagerEvent) {
+    public void onPreGameTick() {
+        if (checkNull()) return;
         if (!workGrimFloatingThisTick() && enableElytraSlowFall.get()) {
             if (mc.player.isFallFlying() && !mc.player.isOnGround()) {
                 boolean rotateYaw = Tasks.getTick() % 2 == 0;
-                movementManagerEvent.context.pushImportantRotation(true, rotateYaw);
-                EntityUtils.setEntityPitchSafe(mc.player, 0);
-                if (rotateYaw) {
-                    PlayerStateManager.setPlayerYawSafe(mc.player, mc.player.getYaw() + 180);
-                }
-                movementManagerEvent.context.markForResetRot();
+                RotationManager.INSTANCE.request(RotationManager.ofDirection(
+                                Optional.of(0.0F),
+                                rotateYaw ? Optional.of(mc.player.getYaw() + 180.0F) : Optional.empty())
+                        .applyMoveFix(false)
+                        .priority(0));
             }
         }
     }

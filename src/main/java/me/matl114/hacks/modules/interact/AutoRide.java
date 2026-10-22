@@ -1,6 +1,5 @@
 package me.matl114.hacks.modules.interact;
 
-import me.matl114.events.Event;
 import me.matl114.events.Listener;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
@@ -29,8 +28,10 @@ public class AutoRide extends BaseModule {
     public final KeyBindRef hotkey = moduleEntry(autoRide.addHotkey(), new MultiKeyBind(), autoRide.addEnable())
             .build();
 
-    public final IntRef cd =
-            intBuilder(autoRide.add("interact-cooldown")).defaultValue(4).build();
+    public final IntRef cd = intBuilder(autoRide.add("interact-cooldown"))
+            .defaultValue(4)
+            .validator(Configs.INT_NONNEGATIVE)
+            .build();
 
     @Override
     public void registerAll() {
@@ -41,7 +42,7 @@ public class AutoRide extends BaseModule {
     Entity lastEntity;
     int cd1 = 0;
 
-    public void handleInput(Event<Void> event) {
+    public void handleInput() {
         if (enable.get() && !mc.player.hasVehicle()) {
             if (++cd1 > cd.get()) {
                 cd1 = 0;

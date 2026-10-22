@@ -1,30 +1,32 @@
 package me.matl114.hacks.modules.inv;
 
 import com.google.common.util.concurrent.Runnables;
-import java.util.Locale;
-import java.util.OptionalInt;
+import java.util.*;
 import me.matl114.accessors.access.ClientPlayerAccess;
 import me.matl114.accessors.access.HandledScreenAccess;
 import me.matl114.accessors.hacks.PlayerInteractionAccess;
 import me.matl114.events.Event;
 import me.matl114.events.Listener;
+import me.matl114.events.PacketManager;
 import me.matl114.events.impl.SlotClickAction;
 import me.matl114.hacks.InvTasks;
 import me.matl114.hacks.MovTasks;
 import me.matl114.hacks.api.BaseModule;
 import me.matl114.hacks.api.ModulePath;
+import me.matl114.hacks.modules.move.MovExtra;
+import me.matl114.hacks.modules.task.PostManager;
 import me.matl114.hacks.utils.HotKeyUtils;
 import me.matl114.hacks.utils.enums.GhostHandMode;
 import me.matl114.hooks.ViaFabricPlusHooks;
 import me.matl114.hooks.ViaProtocols;
 import me.matl114.managers.Configs;
 import me.matl114.managers.TaskManagers;
+import me.matl114.managers.Tasks;
 import me.matl114.managers.config.DoubleRef;
 import me.matl114.managers.config.FlagRef;
 import me.matl114.managers.config.KeyBindRef;
 import me.matl114.managers.input.KeyCode;
 import me.matl114.managers.input.MultiKeyBind;
-import me.matl114.utils.AttributeUtils;
 import me.matl114.utils.Debug;
 import me.matl114.utils.InventoryUtils;
 import me.matl114.utils.ScreenUtils;
@@ -35,6 +37,7 @@ import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
+import net.minecraft.network.packet.c2s.play.ClientTickEndC2SPacket;
 import net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
@@ -43,6 +46,8 @@ import net.minecraft.text.Text;
 
 public class InvExtra extends BaseModule {
     public static InvExtra INSTANCE;
+    private final Deque<Runnable> postTickGhostHandCallbacks = new ArrayDeque<>();
+    private final Deque<Runnable> nextTickGhostHandCallbacks = new ArrayDeque<>();
     public final ModulePath inventory = makePath(Configs.INV_CONFIG, "inventory");
 
     public InvExtra() {
@@ -64,9 +69,6 @@ public class InvExtra extends BaseModule {
     public final FlagRef expandInventory =
             flagBuilder(inventory.add("expand-backpack-inventory")).build();
 
-    public final FlagRef ghostHandAttribute =
-            flagBuilder(inventory.add("ghost-hand-attribute-sync")).build();
-
     public final KeyBindRef pickItemHotkey = hotkey(inventory.add("pick-item"))
             .defaultValue(new MultiKeyBind(KeyCode.KEY_LEFT_CONTROL, KeyCode.MOUSE_BUTTON_3))
             .registerHotkey(HotKeyUtils.asHandler(this::onPickItem))
@@ -82,6 +84,12 @@ public class InvExtra extends BaseModule {
         super.registerAll();
         registerListener(Listener.getPreClickSlot(), this::onClickSlot);
         registerListener(Listener.getPacketPoint().getChannel(CloseHandledScreenC2SPacket.class), this::onCloseScreen);
+        registerListener(
+                Listener.getPacketPoint().getChannel(ClientTickEndC2SPacket.class),
+                this::onClientTickEnd,
+                Integer.MAX_VALUE);
+        registerListener(Listener.getPreTick(), this::onNewTick);
+        registerListener(Listener.getServerLeavePoint(), event -> postTickGhostHandCallbacks.clear());
         TaskManagers.getToggleManager().register(TaskManagers.PREFIX_BUTTON_TOGGLE + "." + "keep-inv", enableKeepInv);
         TaskManagers.getTaskManager().register(TaskManagers.PREFIX_BUTTON_TASKS + "." + CLEAR_KEEP, this::clearKeep);
     }
@@ -114,9 +122,91 @@ public class InvExtra extends BaseModule {
         }
     }
 
-    public void syncAttr() {
-        if (ghostHandAttribute.get()) {
-            AttributeUtils.updateAttribute(mc.player);
+    List<Runnable> inventoryCallbacks = new ArrayList<>();
+    List<Integer> hotBarCallbacks = new ArrayList<>();
+
+    private void onClientTickEnd(Event<ClientTickEndC2SPacket> event) {
+        if (event.isCancelled()) return;
+        // Movement-post actions may add inventory callbacks during this packet's post-schedule phase.
+        duringCallback = true;
+        try {
+            drainGhostHandCallbacks();
+        } finally {
+            duringCallback = false;
+        }
+        if (!inventoryCallbacks.isEmpty()) {
+            try {
+                MovTasks.getMovExtra().sendSprintPacketsForInventoryAction();
+                List<Runnable> inventoryTasks = new ArrayList<>(inventoryCallbacks);
+                PacketManager.schedulePostScheduleCallback(event.context, () -> {
+                    for (Runnable r : inventoryTasks) {
+                        r.run();
+                    }
+                });
+
+            } finally {
+                inventoryCallbacks.clear();
+            }
+        }
+        if (!hotBarCallbacks.isEmpty()) {
+            try {
+                int lastSelected = hotBarCallbacks.getLast();
+                mc.player.getInventory().setSelectedSlot(lastSelected);
+                PostManager.INSTANCE.addNextTransactionAction((ch2) -> {
+                    PlayerInteractionAccess.of(mc.interactionManager).syncSelectedHotbar(lastSelected);
+                });
+            } finally {
+                hotBarCallbacks.clear();
+            }
+        }
+    }
+
+    private void onNewTick() {
+        if (checkNull()) return;
+        tickNextTickCallbacks();
+    }
+
+    int lastRunningTicks;
+
+    public void tickNextTickCallbacks() {
+        if (lastRunningTicks != Tasks.getTick()) {
+            lastRunningTicks = Tasks.getTick();
+            while (!nextTickGhostHandCallbacks.isEmpty()) {
+                Runnable r = nextTickGhostHandCallbacks.removeLast();
+                r.run();
+            }
+        }
+    }
+
+    public boolean pushPostTickGhostHandCallback(Runnable callback) {
+        if (callback != null && callback != Runnables.doNothing()) {
+            postTickGhostHandCallbacks.push(callback);
+            return true;
+        }
+        return false;
+    }
+
+    public boolean pushNextTickGhostHandCallback(Runnable runnable) {
+        // must ensure that this tick 's nextTick Task already processed
+        tickNextTickCallbacks();
+        if (runnable != null && runnable != Runnables.doNothing()) {
+            nextTickGhostHandCallbacks.addLast(runnable);
+            return true;
+        }
+        return false;
+    }
+
+    public boolean hasPostTickGhostHandCallback() {
+        return !postTickGhostHandCallbacks.isEmpty();
+    }
+
+    public boolean hasNextTickGhostHandCallback() {
+        return !nextTickGhostHandCallbacks.isEmpty();
+    }
+
+    public void drainGhostHandCallbacks() {
+        while (!postTickGhostHandCallbacks.isEmpty()) {
+            postTickGhostHandCallbacks.pop().run();
         }
     }
 
@@ -125,34 +215,27 @@ public class InvExtra extends BaseModule {
         if (selected != hand) {
             if (hand < 9) {
                 PlayerInteractionAccess.of(mc.interactionManager).syncSelectedHotbar(hand);
-                syncAttr();
-                return () -> {
-                    PlayerInteractionAccess.of(mc.interactionManager).syncSelectedHotbar(selected);
-                    syncAttr();
-                };
+                return wrapHotbarTask(selected);
             } else {
                 OptionalInt slotIndex = mc.player.currentScreenHandler.getSlotIndex(mc.player.getInventory(), hand);
                 if (slotIndex.isPresent()) {
                     int swapped = slotIndex.getAsInt();
                     if (swapped >= 0) {
-                        MovTasks.getMovExtra().sendPacketsForInventoryAction();
+                        MovExtra.INSTANCE.sendPacketsForInventoryAction();
                         mc.interactionManager.clickSlot(
                                 mc.player.currentScreenHandler.syncId,
                                 swapped,
                                 selected,
                                 SlotActionType.SWAP,
                                 mc.player);
-                        syncAttr();
-                        return () -> {
-                            MovTasks.getMovExtra().sendPacketsForInventoryAction();
+                        return wrapInvTask(() -> {
                             mc.interactionManager.clickSlot(
                                     mc.player.currentScreenHandler.syncId,
                                     swapped,
                                     selected,
                                     SlotActionType.SWAP,
                                     mc.player);
-                            syncAttr();
-                        };
+                        });
                     } else {
                         return null;
                     }
@@ -193,17 +276,14 @@ public class InvExtra extends BaseModule {
                     MovTasks.getMovExtra().sendPacketsForInventoryAction();
                     mc.interactionManager.clickSlot(
                             mc.player.currentScreenHandler.syncId, swapped, selected, SlotActionType.SWAP, mc.player);
-                    syncAttr();
-                    return () -> {
-                        MovTasks.getMovExtra().sendPacketsForInventoryAction();
+                    return wrapInvTask(() -> {
                         mc.interactionManager.clickSlot(
                                 mc.player.currentScreenHandler.syncId,
                                 swapped,
                                 selected,
                                 SlotActionType.SWAP,
                                 mc.player);
-                        syncAttr();
-                    };
+                    });
                 } else {
                     return null;
                 }
@@ -225,13 +305,10 @@ public class InvExtra extends BaseModule {
 
                 mc.interactionManager.clickSlot(
                         mc.player.currentScreenHandler.syncId, swapped, 40, SlotActionType.SWAP, mc.player);
-                syncAttr();
-                return () -> {
-                    MovTasks.getMovExtra().sendPacketsForInventoryAction();
+                return wrapInvTask(() -> {
                     mc.interactionManager.clickSlot(
                             mc.player.currentScreenHandler.syncId, swapped, 40, SlotActionType.SWAP, mc.player);
-                    syncAttr();
-                };
+                });
             } else {
                 return null;
             }
@@ -247,11 +324,7 @@ public class InvExtra extends BaseModule {
             return Runnables.doNothing();
         }
         PlayerInteractionAccess.of(mc.interactionManager).syncSelectedHotbar(hand);
-        syncAttr();
-        return () -> {
-            PlayerInteractionAccess.of(mc.interactionManager).syncSelectedHotbar(selected);
-            syncAttr();
-        };
+        return wrapHotbarTask(selected);
     }
 
     //    public Runnable swapInventoryIndex(int a, int b){
@@ -303,33 +376,24 @@ public class InvExtra extends BaseModule {
             // use number operation
             int target = targetSlotInstance.getIndex();
             mc.interactionManager.clickSlot(handler.syncId, armorSlot, target, SlotActionType.SWAP, mc.player);
-            syncAttr();
-            return () -> {
-                MovTasks.getMovExtra().sendPacketsForInventoryAction();
+            return wrapInvTask(() -> {
                 mc.interactionManager.clickSlot(handler.syncId, armorSlot, target, SlotActionType.SWAP, mc.player);
-                syncAttr();
-            };
+            });
         } else {
             var armorSlotInstance = handler.slots.get(armorSlot);
             if (armorSlotInstance.inventory instanceof PlayerInventory
                     && (armorSlotInstance.getIndex() < 9 || armorSlotInstance.getIndex() == 40)) {
                 int target = armorSlotInstance.getIndex();
                 mc.interactionManager.clickSlot(handler.syncId, targetSlot, target, SlotActionType.SWAP, mc.player);
-                syncAttr();
-                return () -> {
-                    MovTasks.getMovExtra().sendPacketsForInventoryAction();
+                return wrapInvTask(() -> {
                     mc.interactionManager.clickSlot(handler.syncId, targetSlot, target, SlotActionType.SWAP, mc.player);
-                    syncAttr();
-                };
+                });
             } else {
                 // fuck, do not kick me.
                 swapTwoIdiotSlot(handler, targetSlot, armorSlot);
-                syncAttr();
-                return () -> {
-                    MovTasks.getMovExtra().sendPacketsForInventoryAction();
+                return wrapInvTask(() -> {
                     swapTwoIdiotSlot(handler, targetSlot, armorSlot);
-                    syncAttr();
-                };
+                });
             }
         }
     }
@@ -380,6 +444,29 @@ public class InvExtra extends BaseModule {
                 handler.syncId, targetSlot, fuckingHotbar114514, SlotActionType.SWAP, mc.player);
     }
 
+    boolean duringCallback = false;
+
+    private Runnable wrapInvTask(Runnable runnable) {
+        return () -> {
+            if (duringCallback) {
+                inventoryCallbacks.add(runnable);
+            } else {
+                MovTasks.getMovExtra().sendPacketsForInventoryAction();
+                runnable.run();
+            }
+        };
+    }
+
+    private Runnable wrapHotbarTask(int swap) {
+        return () -> {
+            if (duringCallback) {
+                hotBarCallbacks.add(swap);
+            } else {
+                PlayerInteractionAccess.of(mc.interactionManager).syncSelectedHotbar(swap);
+            }
+        };
+    }
+
     public boolean onPickItem() {
 
         if (mc.player == null) return false;
@@ -419,12 +506,16 @@ public class InvExtra extends BaseModule {
     }
 
     public void clearKeep() {
-
         ClientPlayerEntity player = MinecraftClient.getInstance().player;
         if (player != null) {
             ClientPlayerAccess access = ClientPlayerAccess.of(player);
             access.clearKeepedInventory(true);
             Debug.chat(Text.literal("已清除界面历史记录"));
         }
+    }
+
+    public enum ActionType {
+        INV,
+        HOT_BAR;
     }
 }
