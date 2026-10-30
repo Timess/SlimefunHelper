@@ -483,7 +483,11 @@ public class TargetSelector extends BaseModule implements RayCastCalculator<Enti
     private boolean passHostileCheck(Entity e) {
         if (hostile.get()) {
             if (e instanceof EndermanEntity enderman && !enderman.isAngry()) return false;
-            if (e instanceof ZombifiedPiglinEntity piglin && !piglin.isAttacking()) return false;
+            if (e instanceof ZombifiedPiglinEntity piglin){
+                long time = piglin.getAngerEndTime();
+                long currentTime = e.getEntityWorld().getTime();
+                return currentTime < time;
+            }
         }
 
         return true;
