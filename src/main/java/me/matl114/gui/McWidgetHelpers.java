@@ -168,24 +168,24 @@ public class McWidgetHelpers {
         boolean startDrag = false;
 
         @Override
-        public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
+        public boolean onMouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
             if (this.startDrag && this.getDelegate() != null) {
                 var delegate = this.getDelegate();
                 // 设置cursor位置
                 float textureScale = getTextureScale();
                 TextFieldAccess.of(delegate)
                         .dragSelect(
-                                (int) ((mouseX - this.getX() - delegate.getX()) / textureScale),
-                                (int) ((mouseY - this.getY() - delegate.getY()) / textureScale),
+                                (int) ((mouseX - this.x() - delegate.getX()) / textureScale),
+                                (int) ((mouseY - this.y() - delegate.getY()) / textureScale),
                                 true);
             }
-            return super.mouseDragged(mouseX, mouseY, button, deltaX, deltaY);
+            return super.onMouseDragged(mouseX, mouseY, button, deltaX, deltaY);
         }
 
         @Override
         public boolean startDrag(Screen screen, double mouseX, double mouseY) {
             if (getDelegate() != null
-                    && TextFieldAccess.of(getDelegate()).canStartDrag(mouseX - this.getX(), mouseY - this.getY())) {
+                    && TextFieldAccess.of(getDelegate()).canStartDrag(mouseX - this.x(), mouseY - this.y())) {
                 this.startDrag = true;
                 return true;
             }

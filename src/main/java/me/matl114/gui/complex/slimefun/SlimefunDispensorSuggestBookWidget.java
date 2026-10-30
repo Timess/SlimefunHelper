@@ -389,8 +389,7 @@ public class SlimefunDispensorSuggestBookWidget extends SubScreenWidget {
                                 if (button == 2) {
                                     if (type == Type.MOUSE_CLICK) {
                                         // init
-                                        setHoveringRecipe(
-                                                recipeEntry, element.getX() + mouseX, element.getY() + mouseY);
+                                        setHoveringRecipe(recipeEntry, element.x() + mouseX, element.y() + mouseY);
                                         // what can I say?
                                         // 最好加一个
                                         Tasks.scheduleDelayed(
@@ -438,11 +437,11 @@ public class SlimefunDispensorSuggestBookWidget extends SubScreenWidget {
     }
 
     @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+    public boolean onMouseClicked(double mouseX, double mouseY, int button) {
         // when click, schedule a refresh
         // probably move item from-to inv
         if (this.onlyShowRelated) Tasks.scheduleDelayed(this::refreshContents, 5);
-        if (super.mouseClicked(mouseX, mouseY, button)) {
+        if (super.onMouseClicked(mouseX, mouseY, button)) {
             return true;
         } else {
             // remove hovering cancel, add cancel buttons in hover instead
@@ -462,10 +461,10 @@ public class SlimefunDispensorSuggestBookWidget extends SubScreenWidget {
     //    }
 
     @Override
-    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+    public boolean onMouseReleased(double mouseX, double mouseY, int button) {
         // release any delegating hover
 
-        return super.mouseReleased(mouseX, mouseY, button);
+        return super.onMouseReleased(mouseX, mouseY, button);
     }
 
     public void refreshContents() {

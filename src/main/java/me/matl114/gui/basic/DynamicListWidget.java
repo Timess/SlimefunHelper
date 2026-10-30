@@ -31,10 +31,10 @@ public class DynamicListWidget extends DrawableWidget implements SubSelectable {
     }
 
     @Override
-    public int getHeight() {
+    public int height() {
         int y = 0;
         for (DrawableWidget child : children) {
-            y += child.getY() + child.getHeight();
+            y += child.y() + child.height();
         }
         return y;
     }
@@ -67,9 +67,9 @@ public class DynamicListWidget extends DrawableWidget implements SubSelectable {
             VDrawContext context, int mouseX, int mouseY, float delta, boolean disableSelect) {
         super.renderInDefaultMatrix(context, mouseX, mouseY, delta, disableSelect);
         // handling mouse Coord in render should be scaled? here
-        int translatedMouseX = (mouseX - this.getX());
+        int translatedMouseX = (mouseX - this.x());
 
-        int translatedMouseY = mouseY - this.getY();
+        int translatedMouseY = mouseY - this.y();
         float textureScale = getTextureScale();
         if (textureScale != 1.0f) {
             translatedMouseX = (int) (translatedMouseX / textureScale);
@@ -87,7 +87,7 @@ public class DynamicListWidget extends DrawableWidget implements SubSelectable {
                     selected = ch;
                     break;
                 }
-                yLevel += ch.getY() + ch.getHeight();
+                yLevel += ch.y() + ch.height();
             }
         }
         int yLevel = 0;
@@ -99,7 +99,7 @@ public class DynamicListWidget extends DrawableWidget implements SubSelectable {
 
             ch.render0(context, translatedMouseX, translatedMouseY - yLevel, delta, disable);
             // dynamic height calculation
-            int height = ch.getY() + ch.getHeight();
+            int height = ch.y() + ch.height();
             ;
             yLevel += height;
             if (height != 0) {
@@ -110,10 +110,10 @@ public class DynamicListWidget extends DrawableWidget implements SubSelectable {
     }
 
     @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+    public boolean onMouseClicked(double mouseX, double mouseY, int button) {
         // this should not be scaled because, scale do not change bounding box
-        double translatedMouseX = mouseX - this.getX();
-        double translatedMouseY = mouseY - this.getY();
+        double translatedMouseX = mouseX - this.x();
+        double translatedMouseY = mouseY - this.y();
         float textureScale = getTextureScale();
         if (textureScale != 1.0f) {
             translatedMouseX = (int) (translatedMouseX / textureScale);
@@ -121,21 +121,21 @@ public class DynamicListWidget extends DrawableWidget implements SubSelectable {
         }
         int yLevel = 0;
         for (var ch : children) {
-            if (ch.mouseClicked(translatedMouseX, translatedMouseY - yLevel, button)) {
+            if (ch.onMouseClicked(translatedMouseX, translatedMouseY - yLevel, button)) {
                 setSelected(ch);
                 return true;
             }
-            yLevel += ch.getY() + ch.getHeight();
+            yLevel += ch.y() + ch.height();
         }
         setSelected(null);
         return false;
     }
 
     @Override
-    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+    public boolean onMouseReleased(double mouseX, double mouseY, int button) {
 
-        double translatedMouseX = mouseX - this.getX();
-        double translatedMouseY = mouseY - this.getY();
+        double translatedMouseX = mouseX - this.x();
+        double translatedMouseY = mouseY - this.y();
         float textureScale = getTextureScale();
         if (textureScale != 1.0f) {
             translatedMouseX = (int) (translatedMouseX / textureScale);
@@ -143,28 +143,28 @@ public class DynamicListWidget extends DrawableWidget implements SubSelectable {
         }
         int yLevel = 0;
         for (var ch : children) {
-            if (ch.mouseReleased(translatedMouseX, translatedMouseY - yLevel, button)) {
+            if (ch.onMouseReleased(translatedMouseX, translatedMouseY - yLevel, button)) {
                 return true;
             }
-            yLevel += ch.getY() + ch.getHeight();
+            yLevel += ch.y() + ch.height();
         }
         return false;
     }
 
     @Override
-    public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
+    public boolean onMouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
         if (this.dragging != null && this.dragging.isDragging()) {
             int yLevel = 0;
             for (var ch : children) {
                 if (ch == this.dragging) {
                     break;
                 }
-                yLevel += ch.getY() + ch.getHeight();
+                yLevel += ch.y() + ch.height();
             }
             float textureScale = getTextureScale();
-            return this.dragging.mouseDragged(
-                    (mouseX - this.getX()) / textureScale,
-                    ((mouseY - this.getY()) / textureScale) - yLevel,
+            return this.dragging.onMouseDragged(
+                    (mouseX - this.x()) / textureScale,
+                    ((mouseY - this.y()) / textureScale) - yLevel,
                     button,
                     deltaX / textureScale,
                     deltaY / textureScale);
@@ -192,8 +192,8 @@ public class DynamicListWidget extends DrawableWidget implements SubSelectable {
 
     @Override
     public boolean startDrag(Screen screen, double mouseX, double mouseY) {
-        double translatedMouseX = mouseX - this.getX();
-        double translatedMouseY = mouseY - this.getY();
+        double translatedMouseX = mouseX - this.x();
+        double translatedMouseY = mouseY - this.y();
         float textureScale = getTextureScale();
         if (textureScale != 1.0f) {
             translatedMouseX = (int) (translatedMouseX / textureScale);
@@ -205,7 +205,7 @@ public class DynamicListWidget extends DrawableWidget implements SubSelectable {
                 this.dragging = ch;
                 return true;
             }
-            yLevel += ch.getY() + ch.getHeight();
+            yLevel += ch.y() + ch.height();
         }
         return false;
     }
@@ -218,10 +218,10 @@ public class DynamicListWidget extends DrawableWidget implements SubSelectable {
                 if (ch == this.dragging) {
                     break;
                 }
-                yLevel += ch.getY() + ch.getHeight();
+                yLevel += ch.y() + ch.height();
             }
-            double translatedMouseX = mouseX - this.getX();
-            double translatedMouseY = mouseY - this.getY();
+            double translatedMouseX = mouseX - this.x();
+            double translatedMouseY = mouseY - this.y();
             float textureScale = getTextureScale();
             if (textureScale != 1.0f) {
                 translatedMouseX = (int) (translatedMouseX / textureScale);
@@ -231,10 +231,10 @@ public class DynamicListWidget extends DrawableWidget implements SubSelectable {
         }
     }
 
-    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+    public boolean onMouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         // should not scrolled
-        double translatedMouseX = mouseX - this.getX();
-        double translatedMouseY = mouseY - this.getY();
+        double translatedMouseX = mouseX - this.x();
+        double translatedMouseY = mouseY - this.y();
         float textureScale = getTextureScale();
         if (textureScale != 1.0f) {
             translatedMouseX = (int) (translatedMouseX / textureScale);
@@ -242,26 +242,26 @@ public class DynamicListWidget extends DrawableWidget implements SubSelectable {
         }
         int yLevel = 0;
         for (var ch : children) {
-            if (ch.mouseScrolled(translatedMouseX, translatedMouseY - yLevel, horizontalAmount, verticalAmount)) {
+            if (ch.onMouseScrolled(translatedMouseX, translatedMouseY - yLevel, horizontalAmount, verticalAmount)) {
                 return true;
             }
-            yLevel += ch.getY() + ch.getHeight();
+            yLevel += ch.y() + ch.height();
         }
         return false;
     }
 
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+    public boolean onKeyPressed(int keyCode, int scanCode, int modifiers) {
         for (var ch : children) {
-            if (ch.keyPressed(keyCode, scanCode, modifiers)) {
+            if (ch.onKeyPressed(keyCode, scanCode, modifiers)) {
                 return true;
             }
         }
         return false;
     }
 
-    public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
+    public boolean onKeyReleased(int keyCode, int scanCode, int modifiers) {
         for (var ch : children) {
-            if (ch.keyReleased(keyCode, scanCode, modifiers)) {
+            if (ch.onKeyReleased(keyCode, scanCode, modifiers)) {
                 return true;
             }
         }
@@ -269,9 +269,9 @@ public class DynamicListWidget extends DrawableWidget implements SubSelectable {
     }
 
     @Override
-    public boolean charTyped(char chr, int modifiers) {
+    public boolean onCharTyped(char chr, int modifiers) {
         for (var ch : children) {
-            if (ch.charTyped(chr, modifiers)) {
+            if (ch.onCharTyped(chr, modifiers)) {
                 return true;
             }
         }
@@ -283,11 +283,10 @@ public class DynamicListWidget extends DrawableWidget implements SubSelectable {
         int yLevel = 0;
         for (var entry : children) {
             float textureScale = getTextureScale();
-            if (entry.isMouseOver(
-                    (mouseX - this.getX()) / textureScale, ((mouseY - this.getY()) / textureScale) - yLevel)) {
+            if (entry.isMouseOver((mouseX - this.x()) / textureScale, ((mouseY - this.y()) / textureScale) - yLevel)) {
                 return true;
             }
-            yLevel += entry.getHeight();
+            yLevel += entry.height();
         }
         return false;
     }

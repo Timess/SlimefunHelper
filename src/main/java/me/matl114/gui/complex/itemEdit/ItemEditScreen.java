@@ -204,8 +204,8 @@ public class ItemEditScreen extends ConfirmingBigScreen {
     }
 
     @Override
-    protected void init() {
-        super.init();
+    protected void refreshWidgets() {
+        super.refreshWidgets();
         // 子屏幕大小400 * content_height - 60
         // 40 ~ 60,给上方的按钮
         // 60 ~ conten_end_y给下面的屏幕
@@ -303,8 +303,8 @@ public class ItemEditScreen extends ConfirmingBigScreen {
             }
             this.widget = this.itemAttrValue
                     .generateEditBox(
-                            ItemEditScreen.this.processingSubScreen.getX() + 10,
-                            ItemEditScreen.this.processingSubScreen.getY() + 10,
+                            ItemEditScreen.this.processingSubScreen.x() + 10,
+                            ItemEditScreen.this.processingSubScreen.y() + 10,
                             ItemEditScreen.this.processingSubScreen.getTextureWidth() - 20,
                             ItemEditScreen.this.processingSubScreen.getTextureHeight() - 20)
                     .getDelegate();
@@ -348,8 +348,8 @@ public class ItemEditScreen extends ConfirmingBigScreen {
             // refresh widget with absolute coord
             this.widget = this.itemAttrValue
                     .generateEditBox(
-                            ItemEditScreen.this.processingSubScreen.getX() + 10,
-                            ItemEditScreen.this.processingSubScreen.getY() + 10,
+                            ItemEditScreen.this.processingSubScreen.x() + 10,
+                            ItemEditScreen.this.processingSubScreen.y() + 10,
                             ItemEditScreen.this.processingSubScreen.getTextureWidth() - 20,
                             ItemEditScreen.this.processingSubScreen.getTextureHeight() - 20)
                     .getDelegate();
@@ -909,8 +909,8 @@ public class ItemEditScreen extends ConfirmingBigScreen {
                 ExecutableWidget formatButton;
                 ExecutableWidget wikiWidget;
 
-                protected void init() {
-                    super.init();
+                protected void refreshWidgets() {
+                    super.refreshWidgets();
                     URI uri = null;
                     try {
                         String url = "https://zh.minecraft.wiki/w/%E6%95%B0%E6%8D%AE%E7%BB%84%E4%BB%B6#"

@@ -134,7 +134,7 @@ public class FileTreeWidget extends SubScreenWidget {
                 toolbarButtonWidth));
         scroll = new ScrollableListWidget(2, ROW_HEIGHT + 2, width - 16, height - 42);
         scroll.addScrollingWidget(rows);
-        addDrawableChild(DisplayWidget.instance(scroll.getX(), scroll.getY(), scroll.getWidth(), scroll.getHeight())
+        addDrawableChild(DisplayWidget.instance(scroll.x(), scroll.y(), scroll.width(), scroll.height())
                 .setRenderHandler(new AbstractElement()
                         .setShowTooltips(false)
                         .combineRender((element, context, mouseX, mouseY, delta, alpha, highlight) -> context.fill(
@@ -303,7 +303,7 @@ public class FileTreeWidget extends SubScreenWidget {
         name.addValidator(FileSaveWidget::isValidFileName);
         name.validateAndUpdate();
         DrawableWidget input =
-                factory.createInput(name, TextAlign.LEFT, 0, 0, entry.delegate().getWidth(), ROW_HEIGHT);
+                factory.createInput(name, TextAlign.LEFT, 0, 0, entry.delegate().width(), ROW_HEIGHT);
         RenameEdit edit = new RenameEdit(entry, entry.delegate().getDelegate(), input, name, screen);
         renameEdit = edit;
         entry.delegate().setContentDelegate(input);
@@ -339,18 +339,18 @@ public class FileTreeWidget extends SubScreenWidget {
                 / client.getWindow().getHeight();
         if (inverseTreeTransform == null || edit.entry().delegate().inverseTransform == null) return false;
         Vector3f treePoint = inverseTreeTransform.transformPosition((float) mouseX, (float) mouseY, 0, new Vector3f());
-        if (treePoint.x < scroll.getX()
-                || treePoint.x >= scroll.getX() + scroll.getWidth()
-                || treePoint.y < scroll.getY()
-                || treePoint.y >= scroll.getY() + scroll.getHeight()) return false;
+        if (treePoint.x < scroll.x()
+                || treePoint.x >= scroll.x() + scroll.width()
+                || treePoint.y < scroll.y()
+                || treePoint.y >= scroll.y() + scroll.height()) return false;
         Vector3f inputPoint = edit.entry()
                 .delegate()
                 .inverseTransform
                 .transformPosition((float) mouseX, (float) mouseY, 0, new Vector3f());
         return inputPoint.x >= 0
-                && inputPoint.x < edit.input().getWidth()
+                && inputPoint.x < edit.input().width()
                 && inputPoint.y >= 0
-                && inputPoint.y < edit.input().getHeight();
+                && inputPoint.y < edit.input().height();
     }
 
     private void cancelRename(RenameEdit edit) {
@@ -404,13 +404,13 @@ public class FileTreeWidget extends SubScreenWidget {
     }
 
     @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+    public boolean onKeyPressed(int keyCode, int scanCode, int modifiers) {
         if (renameEdit != null && (keyCode == KEY_ENTER || keyCode == KEY_KP_ENTER)) {
             finishRename(renameEdit);
             return true;
         }
         if (renameEdit != null) renameEdit.input().setFocused(true);
-        return super.keyPressed(keyCode, scanCode, modifiers);
+        return super.onKeyPressed(keyCode, scanCode, modifiers);
     }
 
     /** Add after all other widgets in the outermost container so inputs consume keys first. */
@@ -423,10 +423,10 @@ public class FileTreeWidget extends SubScreenWidget {
     }
 
     @Override
-    public boolean charTyped(char chr, int modifiers) {
-        if (renameEdit == null) return super.charTyped(chr, modifiers);
+    public boolean onCharTyped(char chr, int modifiers) {
+        if (renameEdit == null) return super.onCharTyped(chr, modifiers);
         renameEdit.input().setFocused(true);
-        return renameEdit.input().charTyped(chr, modifiers);
+        return renameEdit.input().onCharTyped(chr, modifiers);
     }
 
     private void select(@Nullable File file, boolean directory) {
@@ -461,9 +461,9 @@ public class FileTreeWidget extends SubScreenWidget {
             rows.clearChildren();
             Set<File> visibleFiles = new HashSet<>();
             if (tree == null) {
-                rows.addDrawableChild(factory.createText("widget.file.loading", 0, 0, rows.getWidth(), ROW_HEIGHT));
+                rows.addDrawableChild(factory.createText("widget.file.loading", 0, 0, rows.width(), ROW_HEIGHT));
             } else if (tree.error() != null) {
-                rows.addDrawableChild(factory.createText(tree.error(), 0, 0, rows.getWidth(), ROW_HEIGHT));
+                rows.addDrawableChild(factory.createText(tree.error(), 0, 0, rows.width(), ROW_HEIGHT));
             } else {
                 for (Node child : tree.children()) addNode(child, 0, visibleFiles);
             }
@@ -548,8 +548,8 @@ public class FileTreeWidget extends SubScreenWidget {
     }
 
     private void addNode(Node node, int depth, Set<File> visibleFiles) {
-        int indent = Math.min(depth, (rows.getWidth() - 64) / BUTTON_SIZE) * BUTTON_SIZE;
-        int width = rows.getWidth() - indent;
+        int indent = Math.min(depth, (rows.width() - 64) / BUTTON_SIZE) * BUTTON_SIZE;
+        int width = rows.width() - indent;
         // Indent the entire row, starting at its button slot.
         SubScreenWidget row = new SubScreenWidget(indent, 0, width, ROW_HEIGHT);
         visibleFiles.add(node.file());
