@@ -454,4 +454,68 @@ public class RenderCollectors {
             }
         };
     }
+
+    public static RenderCollector<RenderElements.Text> createTextCollector2DTop() {
+        return new RenderCollector.Impl<>() {
+            @Override
+            public void render3D(MatrixStack stack, float partialTick) {
+                if (entries.isEmpty()) return;
+            }
+
+            @Override
+            public void render2D(VDrawContext vdraw, float partialTick) {
+                if (entries.isEmpty()) return;
+                Matrix4f cam = RenderListener.getWorldModelViewMatrix();
+                Matrix4f proj = RenderListener.getWorldBasicProjectionMatrix();
+                Function<Vec3d, Vector2d> projector = RenderUtils.createProjector(cam, proj);
+                float textHeight = vdraw.getTextDrawer().getTextHeight();
+
+                for (var entry : entries) {
+                    var pair = entry.val();
+                    Vec3d pos = pair.position();
+                    int color = entry.index();
+                    Vector2d screenPos = projector.apply(pos);
+
+                    if (screenPos != null) {
+                        vdraw.pushMatrix();
+                        try {
+                            vdraw.getMatrices().translate((float) screenPos.x, (float) screenPos.y);
+                            float scale = pair.scale();
+                            vdraw.getMatrices().scale(scale, scale);
+
+                            Text text = pair.text();
+
+                            List<Text> listText = ChatUtils.splitToMultiLineText(text, Integer.MAX_VALUE);
+                            float totalHeight = (listText.size() + 1) * textHeight;
+
+                            int maxWidth = 0;
+                            for (Text value : listText) {
+                                maxWidth =
+                                        Math.max(maxWidth, vdraw.getTextDrawer().getWidth(value));
+                            }
+
+                            // 2. 以最长行的一半作为水平居中的偏移基准（实现整体以最长行中线对齐）
+                            float startX = -maxWidth / 2.0f;
+
+                            // 3. 垂直方向：位于目标上方再多一行
+                            float startY = -totalHeight;
+
+                            int index = 0;
+                            for (var re : listText) {
+                                vdraw.getMatrices().pushMatrix();
+                                // 每行内部文本保持左对齐，整体块以 startX（最长行的一半）居中
+                                vdraw.getMatrices().translate(startX, startY + (index * textHeight));
+                                vdraw.drawText(vdraw.getTextDrawer(), re.asOrderedText(), 0, 0, color, false);
+                                vdraw.getMatrices().popMatrix();
+                                index += 1;
+                            }
+
+                        } finally {
+                            vdraw.popMatrix();
+                        }
+                    }
+                }
+            }
+        };
+    }
 }
